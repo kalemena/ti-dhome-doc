@@ -1,0 +1,7 @@
+= Ti-DHome - Doc
+
+Ti-DHome is an Home automation project. +
+This repository contains documentation that can be used to build your Home Automation project.
+
+
+image:src/main/adoc/images/schema-architecture.png?raw=true[Overview]
