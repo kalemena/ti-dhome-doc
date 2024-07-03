@@ -1,0 +1,11 @@
+:toc:
+
+ifdef::env-github[]
+:imagesdir: /src/main/adoc/images
+endif::[]
+
+= Ti-DHome
+
+Ti-DHome is an Home automation project. +
+This repository contains documentation that can be used to build your Home Automation project.
+
