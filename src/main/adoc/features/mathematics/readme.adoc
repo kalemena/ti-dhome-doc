@@ -1,0 +1,10 @@
+= Mathematics
+:hardbreaks:
+
+[IMPORTANT]
+====
+Pre-requisits for Mathematics:
+
+- Database with enough data points: Prometheus
+- (optional) Graphic Interface to visualize queries: Grafana
+====
