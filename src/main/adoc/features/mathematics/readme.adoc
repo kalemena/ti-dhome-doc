@@ -8,3 +8,26 @@ Pre-requisits for Mathematics:
 - Database with enough data points: Prometheus
 - (optional) Graphic Interface to visualize queries: Grafana
 ====
+
+== Optimization
+
+Below examples uses mathematics on electricity data points.
+
+.What we own:
+* 365+ days of electricity consumption measures: Power (W) and Energy (kWh)
+* Energy measures are categorized with Enedis *Tempo* costs (France contract with variable costs):
+** Blue: ~300 days of low costs
+** White: ~42 days of mid costs
+** Red: ~22 days of low costs
+** Blue/White/Red costs are divided into High/Low hours, with High hours between 6am and 10pm (16h)
+* Solar Energy measures:
+** Solar Panel Total production
+*** Auto-consumption by house
+*** Energy sent to the grid
+* Some high consumer measures:
+** Car
+** Water heater
+** Electric heaters
+** Fridge
+** Computers
+
