@@ -31,3 +31,19 @@ Below examples uses mathematics on electricity data points.
 ** Fridge
 ** Computers
 
+.Questions we can have:
+* Is *Tempo* the good contract for our consumption?
+** Many other contracts exists, starting from *Base* (same cost all the time), *HC/HP* (same low/high costs all days of years), *ZenFlex*, *ZenFix*, etc
+* What happens if contract hours change? (some low cost hours might move in mid-day when sun is high)
+
+.Question - predictions:
+* What happens if adding more solar during the day, aka Tempo high costs? 
+** Evolution of consumption might show that previously best contract might no longer be accurate one to pick
+* What would happen if we move some consumption?
+** Water heater, Car could be moved?
+
+.Questions - optional
+* Yearly, when do comsumption occurs?
+* Weekly, when do consumption occurs?
+* Daily, when do consumption occurs?
+* All above can be visualized using graphs
