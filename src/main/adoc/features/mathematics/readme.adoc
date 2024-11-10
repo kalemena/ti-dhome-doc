@@ -47,3 +47,15 @@ Below examples uses mathematics on electricity data points.
 * Weekly, when do consumption occurs?
 * Daily, when do consumption occurs?
 * All above can be visualized using graphs
+
+=== Setting the facts
+
+[TIP]
+====
+Visualizing the facts provide a great understanding.
+====
+
+.Example rendering of 365 days of consumption:
+image:Examples-Power-Consumptions-01.png[]
+
+Above, a minimalist donut graph was chosen for example.
