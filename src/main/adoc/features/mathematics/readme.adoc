@@ -59,3 +59,29 @@ Visualizing the facts provide a great understanding.
 image:Examples-Power-Consumptions-01.png[]
 
 Above, a minimalist donut graph was chosen for example.
+
+Here is how to gather the facts from datapoints:
+
+.Metrics definition
+[cols="1,1,2"]
+|===
+
+|Metric
+|Description
+|Formula
+
+|Solar Total| Solar Energy Total         | opendtu_YieldTotal{type="AC"}[1h]
+
+|Grid In    | Energy Consumed from Grid  | zigbee_energy_b{location="Garage~PowerMeter"}[1h]
+|Grid Out   | Energy Produced to Grid    | zigbee_energy_produced_b{location="Garage~PowerMeter"}[1h]
+
+|HP Rouge   | Rouge High Cost Day Energy | teleinfo_BBRHPJR{location="main"}[1h]
+|HC Rouge   | Rouge Low Cost Day Energy  | teleinfo_BBRHCJR{location="main"}[1h]
+
+|HP Blanc   | Blanc High Cost Day Energy | teleinfo_BBRHPJW{location="main"}[1h]
+|HC Blanc   | Blanc Low Cost Day Energy  | teleinfo_BBRHCJW{location="main"}[1h]
+
+|HP Bleu    | Bleu High Cost Day Energy  | teleinfo_BBRHPJB{location="main"}[1h]
+|HC Bleu    | Bleu Low Cost Day Energy   | teleinfo_BBRHCJB{location="main"}[1h]
+
+|===
