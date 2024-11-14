@@ -75,13 +75,13 @@ Here is how to gather the facts from datapoints:
 |Grid In    | Energy Consumed from Grid  | zigbee_energy_b{location="Garage~PowerMeter"}[1h]
 |Grid Out   | Energy Produced to Grid    | zigbee_energy_produced_b{location="Garage~PowerMeter"}[1h]
 
-|HP Rouge   | Rouge High Cost Day Energy | teleinfo_BBRHPJR{location="main"}[1h]
-|HC Rouge   | Rouge Low Cost Day Energy  | teleinfo_BBRHCJR{location="main"}[1h]
+|HP Red     | Red High Cost Day Energy   | teleinfo_BBRHPJR{location="main"}[1h]
+|HC Red     | Red Low Cost Day Energy    | teleinfo_BBRHCJR{location="main"}[1h]
 
-|HP Blanc   | Blanc High Cost Day Energy | teleinfo_BBRHPJW{location="main"}[1h]
-|HC Blanc   | Blanc Low Cost Day Energy  | teleinfo_BBRHCJW{location="main"}[1h]
+|HP White   | White High Cost Day Energy | teleinfo_BBRHPJW{location="main"}[1h]
+|HC White   | White Low Cost Day Energy  | teleinfo_BBRHCJW{location="main"}[1h]
 
-|HP Bleu    | Bleu High Cost Day Energy  | teleinfo_BBRHPJB{location="main"}[1h]
-|HC Bleu    | Bleu Low Cost Day Energy   | teleinfo_BBRHCJB{location="main"}[1h]
+|HP Blue    | Blue High Cost Day Energy  | teleinfo_BBRHPJB{location="main"}[1h]
+|HC Blue    | Blue Low Cost Day Energy   | teleinfo_BBRHCJB{location="main"}[1h]
 
 |===
