@@ -85,3 +85,13 @@ Here is how to gather the facts from datapoints:
 |HC Blue    | Blue Low Cost Day Energy   | teleinfo_BBRHCJB{location="main"}[1h]
 
 |===
+
+[TIP]
+====
+If measures are correct, then Solar auto-consumed:
+
+Solar            = Solar Total - Grid Out
+Home Consumption = Grid In + Solar
+Grid In          = sum(HP/HC Blue/White/Red)
+====
+
