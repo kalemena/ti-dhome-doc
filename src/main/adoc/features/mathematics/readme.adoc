@@ -95,3 +95,28 @@ Home Consumption = Grid In + Solar
 Grid In          = sum(HP/HC Blue/White/Red)
 ====
 
+.Computing yearly consumptions via increase
+.Metrics definition
+[cols="1,3"]
+|===
+
+|Metric
+|Formula
+|Value
+
+|Solar Total| increase(opendtu_YieldTotal{type="AC"}[365d])                                 | 840 kWh
+
+|Grid In    | increase(zigbee_energy_b{location="Garage~PowerMeter"}[365d])                 | 5050 kWh
+|Grid Out   | increase(zigbee_energy_produced_b{location="C03~Garage~PowerMeter"}[365d])    | 280 kWh
+
+|HP Red     | increase(teleinfo_BBRHPJR{}[365d]) / 1000                                     | 185 kWh
+|HC Red     | increase(teleinfo_BBRHCJR{}[365d]) / 1000                                     | 233 kWh
+
+|HP White   | increase(teleinfo_BBRHPJW{}[365d]) / 1000                                     | 375 kWh
+|HC White   | increase(teleinfo_BBRHCJW{}[365d]) / 1000                                     | 552 kWh
+
+|HP Blue    | increase(teleinfo_BBRHPJB{}[365d]) / 1000                                     | 1 277 kWh
+|HC Blue    | increase(teleinfo_BBRHCJB{}[365d]) / 1000                                     | 2 429 kWh
+
+|===
+
