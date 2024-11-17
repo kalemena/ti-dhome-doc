@@ -120,3 +120,9 @@ Grid In          = sum(HP/HC Blue/White/Red)
 
 |===
 
+.Computing yearly consumptions via diff (same result expected)
+[source,txt]
+====
+Solar Total =
+ ((opendtu_YieldTotal{type="AC"} @end()) - (opendtu_YieldTotal{type="AC"} offset 365d)) = 840 kWh
+====
