@@ -160,3 +160,88 @@ Solar Total =
  ((opendtu_YieldTotal{type="AC"} @end()) - (opendtu_YieldTotal{type="AC"} offset 365d)) = 850 kWh
 ====
 
+=== Is *Tempo* the good contract for our consumption?
+
+.Comparing few Contracts on real 365d metrics:
+[cols="1,1,4"]
+|===
+| Contract
+| Cost
+| Formula
+
+| Base
+| 1018 €
+a|
+.∑(Energy) x kWhBase
+[source,bash]
+====
+   (
+      increase(teleinfo_BBRHCJB{}[365d])
+    + increase(teleinfo_BBRHPJB{}[365d])
+    + increase(teleinfo_BBRHCJW{}[365d])
+    + increase(teleinfo_BBRHPJW{}[365d])
+    + increase(teleinfo_BBRHCJR{}[365d])
+    + increase(teleinfo_BBRHPJR{}[365d])
+   ) * $kWhBase / 1000
+====
+
+| Blue
+| 939 €
+a|
+.∑(Energy Low Cost) x kWhHC + ∑(Energy High Cost) x kWhHP
+[source,bash]
+====
+   (
+    ( increase(teleinfo_BBRHCJB{}[365d])
+    + increase(teleinfo_BBRHCJW{}[365d])
+    + increase(teleinfo_BBRHCJR{}[365d]) ) * $kWhHC
+     +
+    ( increase(teleinfo_BBRHPJW{}[365d])
+    + increase(teleinfo_BBRHPJB{}[365d])    
+    + increase(teleinfo_BBRHPJR{}[365d]) ) * $kWhHP
+   ) / 1000
+====
+
+| Tempo
+| 812 €
+a|
+.∑(f(Energy Cost x kWhCost))
+[source,bash]
+====
+   (  increase(teleinfo_BBRHCJB{}[365d]) * $kWhTBHC
+    + increase(teleinfo_BBRHPJB{}[365d]) * $kWhTBHP
+    + increase(teleinfo_BBRHCJW{}[365d]) * $kWhTWHC
+    + increase(teleinfo_BBRHPJW{}[365d]) * $kWhTWHP
+    + increase(teleinfo_BBRHCJR{}[365d]) * $kWhTRHC
+    + increase(teleinfo_BBRHPJR{}[365d]) * $kWhTRHP) / 1000
+====
+
+| ZenFix
+| 885 €
+a|
+.∑(Energy) x kWhBase
+[source,bash]
+====
+   (  increase(teleinfo_BBRHCJB{}[365d])
+    + increase(teleinfo_BBRHPJB{}[365d])
+    + increase(teleinfo_BBRHCJW{}[365d])
+    + increase(teleinfo_BBRHPJW{}[365d])
+    + increase(teleinfo_BBRHCJR{}[365d])
+    + increase(teleinfo_BBRHPJR{}[365d])) * $kWhZenFix / 1000
+====
+
+| ZenFix Tempo
+| 889 €
+a|
+.∑(Energy Low Cost) x kWhHC + ∑(Energy High Cost) x kWhHP
+[source,bash]
+====
+  ((  increase(teleinfo_BBRHCJB{}[365d])
+    + increase(teleinfo_BBRHCJW{}[365d])
+    + increase(teleinfo_BBRHCJR{}[365d])) * $kWhZenFixHC
+    +
+   (  increase(teleinfo_BBRHPJW{}[365d])
+    + increase(teleinfo_BBRHPJB{}[365d])    
+    + increase(teleinfo_BBRHPJR{}[365d])) * $kWhZenFixHP) / 1000
+====
+
