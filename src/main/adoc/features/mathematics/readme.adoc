@@ -245,3 +245,12 @@ a|
     + increase(teleinfo_BBRHPJR{}[365d])) * $kWhZenFixHP) / 1000
 ====
 
+|===
+
+[IMPORTANT]
+----
+ZenFix-tempo has distinct hours for low/high costs compared to Tempo.
+Mathematics assume that we are able to move Tempo nightly consumption to different and partially day time hours.
+This assumption is highly doable, but is also not optimal because day time does not go toward optimizing Solar production.
+----
+
