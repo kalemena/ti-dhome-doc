@@ -162,6 +162,18 @@ Solar Total =
 
 === Is *Tempo* the good contract for our consumption?
 
+[IMPORTANT]
+----
+YES
+Tempo vs Base was initialy 1/3 cheaper. 
+And now, 20% cheaper while moving to less grid energy.
+
+Tempo is interesting as soon as any high consumer of electricity energy can be delayed to Night hours.
+e.g. Heaters (air or water), Car charging, Dryer, etc
+
+On a side note, Tempo can become less interesting when/if adding more Solar energy to the mix, or moving heaters to other energy like wood, and if above high consumers can be moved to sun hours.
+----
+
 .Comparing few Contracts on real 365d metrics:
 [cols="1,1,4"]
 |===
