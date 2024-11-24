@@ -266,3 +266,14 @@ Mathematics assume that we are able to move Tempo nightly consumption to differe
 This assumption is highly doable, but is also not optimal because day time does not go toward optimizing Solar production.
 ----
 
+=== Can we optimize Solar ?
+
+* What is grid consumption between 12h to 13h?
+* What is Solar production at the moment at same hours?
+
+.Explanation of prometheus query:
+* increase(opendtu_YieldTotal{type="AC"}[1h] offset 12h): This calculates the increase in opendtu_YieldTotal over a 1-hour window, offset by 12 hours to start at 12 PM.
+* [365d:1d]: This specifies a range vector over 365 days with a step of 1 day.
+* sum_over_time(...[365d:1d]): This sums the values of the range vector over the 365-day period.
+
+
