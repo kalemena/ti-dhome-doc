@@ -276,4 +276,29 @@ This assumption is highly doable, but is also not optimal because day time does 
 * [365d:1d]: This specifies a range vector over 365 days with a step of 1 day.
 * sum_over_time(...[365d:1d]): This sums the values of the range vector over the 365-day period.
 
+[cols="1,1,6"]
+|===
+| Category
+| Value
+| Formula
 
+| Solar 12pm
+Produced sun energy
+| 125 kWh
+a|
+[source,bash]
+====
+   sum_over_time(increase(opendtu_YieldTotal{type="AC"}[1h] offset 12h)[365d:1d])
+====
+
+| Grid 12pm
+| 94 kWh
+a|
+[source,bash]
+====
+   ( sum_over_time(increase(teleinfo_BBRHPJW{}[1h] offset 12h)[365d:1d])
+   + sum_over_time(increase(teleinfo_BBRHPJB{}[1h] offset 12h)[365d:1d])
+   + sum_over_time(increase(teleinfo_BBRHPJR{}[1h] offset 12h)[365d:1d]) )
+====
+
+|===
