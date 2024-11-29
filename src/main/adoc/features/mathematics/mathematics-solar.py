@@ -1,13 +1,19 @@
 import requests
 
 prometheus_url = "http://localhost:8428/api/v1/query"
-query_template_solar = 'sum_over_time(increase(opendtu_YieldTotal{{type="AC"}}[1h] offset {}h)[365d:1d])'
-query_template_to_grid = 'sum_over_time(increase(zigbee_energy_produced_b{{location="C03~Garage~PowerMeter"}}[1h] offset {}h)[365d:1d])'
-query_template_from_grid = 'sum_over_time(increase(zigbee_energy_b{{location="C03~Garage~PowerMeter"}}[1h] offset {}h)[365d:1d])'
 
-def fetch_query(query_template):
+# metrics to measure
+metrics = [
+    'opendtu_YieldTotal{type="AC"}',
+    'sensors_zigbee_energy_produced_b{location="C03~Garage~PowerMeter"}',
+    'sensors_zigbee_energy_b{location="C03~Garage~PowerMeter"}'
+]
+
+query_template = 'sum_over_time(increase({}[1h] offset {}h)[365d:1d])'
+
+def fetch_query(query_template, metric):
     for hour in range(24):
-        query = query_template.format(24-hour)
+        query = query_template.format(metric, 24-hour)
         # print(f"Query: {query}")
         response = requests.get(prometheus_url, params={'query': query})
         data = response.json()
@@ -26,11 +32,7 @@ def fetch_query(query_template):
         else:
             print(f"{hour:02}:00, Query failed with status '{data['status']}'.")
 
-print(f"\nTime, Solar")
-fetch_query(query_template_solar)
+for metric in metrics:
+    print(f"\nTime, Value")
+    fetch_query(query_template, metric)
 
-print(f"\nTime, ToGrid")
-fetch_query(query_template_to_grid)
-
-print(f"\nTime, FromGrid")
-fetch_query(query_template_from_grid)
