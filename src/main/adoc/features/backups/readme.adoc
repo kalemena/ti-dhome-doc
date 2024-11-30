@@ -1,0 +1,35 @@
+= Backup & Restore
+:hardbreaks-option:
+
+.What to backup? Where to backup?
+[cols="5,10,20,20,100"]
+|===
+| Category
+| Size
+| Source
+| Destination
+| Description
+
+| Prometheus
+| 1G
+ -
+  20G
+a| Docker volume
+victoria-metrics-data
+|
+a|
+Metrics for:
+
+* Energy consumption (Plugs, Clamps or Linky)
+* Power sensors (Plugs, Clamps or Linky)
+* Temperature, Humidity, etc ... sensors
+* Door, Move sensors
+* Device states (plugs on/off, lights, energy time cost, garden valve)
+
+| Configuration
+a|
+* ./etc
+|
+|
+
+|===
