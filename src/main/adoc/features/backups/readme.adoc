@@ -33,3 +33,25 @@ a|
 |
 
 |===
+
+== Troubleshooting
+
+.Sizing backups
+[source, bash]
+----
+$ du -h --max-depth=1 /var/lib/docker/volumes/
+----
+
+.Pre-Backup/Restore
+[source, bash]
+----
+# Options
+$ export BACKUP_DATE=$(date '+%Y-%m-%d')
+$ export BACKUP_FOLDER=/backups/victoriametrics
+
+# Stopping and preventing data ingestion
+$ docker stop ti-dhome_victoriametrics_1
+
+# Preparing destination
+$ mkdir -p $(WORKSPACE)/backup/victoriametrics
+----
