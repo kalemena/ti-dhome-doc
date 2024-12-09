@@ -55,3 +55,11 @@ $ docker stop ti-dhome_victoriametrics_1
 # Preparing destination
 $ mkdir -p $(WORKSPACE)/backup/victoriametrics
 ----
+
+
+.Post-Backup/Restore
+[source, bash]
+----
+# Restart DB for data ingestion
+$ docker start ti-dhome_victoriametrics_1
+----
