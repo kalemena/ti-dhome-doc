@@ -56,6 +56,12 @@ $ docker stop ti-dhome_victoriametrics_1
 $ mkdir -p $(WORKSPACE)/backup/victoriametrics
 ----
 
+.Backup
+[source, bash]
+----
+# Backup: mount volume in other docker instance, and run rsync
+$ docker run --rm -it -v ti-dhome_victoria-metrics-data:/victoria-metrics-data -v $(BACKUP_FOLDER):/backup/victoriametrics -w /victoria-metrics-data alpine sh -c "apk add rsync && rsync --delete -rtD --info=progress2 /victoria-metrics-data/* /backup/victoriametrics/"
+----
 
 .Post-Backup/Restore
 [source, bash]
