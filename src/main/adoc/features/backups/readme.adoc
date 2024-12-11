@@ -60,7 +60,22 @@ $ mkdir -p $(WORKSPACE)/backup/victoriametrics
 [source, bash]
 ----
 # Backup: mount volume in other docker instance, and run rsync
-$ docker run --rm -it -v ti-dhome_victoria-metrics-data:/victoria-metrics-data -v $(BACKUP_FOLDER):/backup/victoriametrics -w /victoria-metrics-data alpine sh -c "apk add rsync && rsync --delete -rtD --info=progress2 /victoria-metrics-data/* /backup/victoriametrics/"
+$ docker run --rm -it \
+    -v ti-dhome_victoria-metrics-data:/victoria-metrics-data \
+    -v $(BACKUP_FOLDER):/backup/victoriametrics \
+    -w /victoria-metrics-data alpine sh \
+    -c "apk add rsync && rsync --delete -rtD --info=progress2 /victoria-metrics-data/* /backup/victoriametrics/"
+----
+
+.Restore
+[source, bash]
+----
+# Retore: idem backup, volumes flipped
+$ docker run --rm -it \
+    -v ti-dhome_victoria-metrics-data:/victoria-metrics-data \
+    -v $(BACKUP_FOLDER):/backup/victoriametrics \
+    -w /victoria-metrics-data alpine sh \
+    -c "apk add rsync && rsync --delete -rtD --info=progress2 /backup/victoriametrics/* /victoria-metrics-data/"
 ----
 
 .Post-Backup/Restore
