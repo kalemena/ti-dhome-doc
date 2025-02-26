@@ -1,0 +1,14 @@
+= EDF - Tempo - Scripts
+
+Below is description and example to fetch few information provided by France main electricity provider: EDF (Electricité de France)
+
+Scripts are focusing on *Tempo* accounts, but can be adapted. 
+
+*Tempo* is an account with 3 types of days, each with High and Low daily costs split during the 24h period.
+
+Scripts provide:
+
+- *Tempo days*: historical and next day values for cost colors.
+- *Tempo costs*: Cost for the various periods
+
+
