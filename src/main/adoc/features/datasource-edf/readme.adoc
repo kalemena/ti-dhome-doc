@@ -12,3 +12,19 @@ Scripts provide:
 - *Tempo costs*: Cost for the various periods
 
 
+
+
+== Requirements
+
+* Python 3.6+
+* `requests` library
+* `python-csv` module (included in standard library)
+
+== API Sources
+
+Data is fetched from:
+https://www.services-rte.com/cms/open_data/v1/tempo?season={period}
+
+== License
+
+MIT License
