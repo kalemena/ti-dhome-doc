@@ -11,6 +11,54 @@ Scripts provide:
 - *Tempo days*: historical and next day values for cost colors.
 - *Tempo costs*: Cost for the various periods
 
+== EDF - Tempo - Days
+
+The *tempo-days.py* script fetches and displays the Tempo calendar data from RTE (Réseau de Transport d'Électricité) for French electricity supply contracts.
+
+== Overview
+
+The Tempo calendar provides color-coded days indicating the electricity tariff period (blue, white, red) for French households with Tempo contracts.
+This script retrieves the data from RTE's API and can display it or export it to CSV format.
+
+== Features
+
+* Fetches Tempo calendar data from RTE API
+* Displays color-coded days for the specified period
+* Exports data to CSV format
+* Handles date formatting and validation
+* Supports command-line arguments for custom periods
+
+== Usage
+
+[source,shell]
+----
+python tempo-days.py [OPTIONS]
+----
+
+=== Options
+
+* `--csv` - Export data to CSV file
+* `--season PERIOD` - Force a specific period (e.g., "2023-2024")
+
+=== Example
+
+[source,shell]
+----
+# Fetch data for tomorrow's period and export to CSV
+python tempo-days.py --csv
+
+# Force a specific period
+python tempo-days.py --season "2023-2024"
+----
+
+== Output
+
+The script displays:
+* Period being queried
+* Sorted list of dates with their color codes (blue=1, white=2, red=3)
+* CSV export confirmation if requested
+
+
 
 
 
