@@ -58,6 +58,52 @@ The script displays:
 * Sorted list of dates with their color codes (blue=1, white=2, red=3)
 * CSV export confirmation if requested
 
+== EDF - Tempo - Costs
+
+.Fetch costs using cUrl
+[source,bash]
+----
+% curl -v "https://tabular-api.data.gouv.fr/api/resources/0c3d1d36-c412-4620-8566-e5cbb4fa2b5a/data/?page_size=1&P_SOUSCRITE__exact=6&__id__sort=desc" | jq .
+  
+{
+  "data": [
+    {
+      "__id": 113,
+      "DATE_DEBUT": "2025-01-08",
+      "DATE_FIN": null,
+      "P_SOUSCRITE": 6,
+      "PART_FIXE_HT": 133.2,
+      "PART_FIXE_TTC": 186.46,
+      "PART_VARIABLE_HCBleu_HT": 0.0727,
+      "PART_VARIABLE_HCBleu_TTC": 0.1232,
+      "PART_VARIABLE_HPBleu_HT": 0.0945,
+      "PART_VARIABLE_HPBleu_TTC": 0.1494,
+      "PART_VARIABLE_HCBlanc_HT": 0.0859,
+      "PART_VARIABLE_HCBlanc_TTC": 0.1391,
+      "PART_VARIABLE_HPBlanc_HT": 0.1142,
+      "PART_VARIABLE_HPBlanc_TTC": 0.173,
+      "PART_VARIABLE_HCRouge_HT": 0.0917,
+      "PART_VARIABLE_HCRouge_TTC": 0.146,
+      "PART_VARIABLE_HPRouge_HT": 0.509,
+      "PART_VARIABLE_HPRouge_TTC": 0.6468
+    }
+  ],
+  "links": {
+    "profile": "https://tabular-api.data.gouv.fr/api/resources/0c3d1d36-c412-4620-8566-e5cbb4fa2b5a/profile/",
+    "swagger": "https://tabular-api.data.gouv.fr/api/resources/0c3d1d36-c412-4620-8566-e5cbb4fa2b5a/swagger/",
+    "next": "https://tabular-api.data.gouv.fr/api/resources/0c3d1d36-c412-4620-8566-e5cbb4fa2b5a/data/?P_SOUSCRITE__exact=6&__id__sort=desc&page=2&page_size=1",
+    "prev": null
+  },
+  "meta": {
+    "page": 1,
+    "page_size": 1,
+    "total": 17
+  }
+}
+----
+
+
+
 
 
 
