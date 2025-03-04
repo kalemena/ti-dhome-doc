@@ -1,4 +1,5 @@
 = EDF - Tempo - Scripts
+:hardbreaks:
 
 Below is description and example to fetch few information provided by France main electricity provider: EDF (Electricité de France)
 
