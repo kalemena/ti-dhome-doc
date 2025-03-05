@@ -61,8 +61,11 @@ The script displays:
 
 == EDF - Tempo - Costs
 
+.Links
+* link:https://www.data.gouv.fr/api/1/datasets/historique-des-tarifs-reglementes-de-vente-delectricite-pour-les-consommateurs-residentiels/[Historique JSON]
+
 .Fetch costs using cUrl
-[source,bash]
+[source,json]
 ----
 % curl -v "https://tabular-api.data.gouv.fr/api/resources/0c3d1d36-c412-4620-8566-e5cbb4fa2b5a/data/?page_size=1&P_SOUSCRITE__exact=6&__id__sort=desc" | jq .
   
@@ -102,12 +105,6 @@ The script displays:
   }
 }
 ----
-
-
-
-
-
-
 
 == Requirements
 
