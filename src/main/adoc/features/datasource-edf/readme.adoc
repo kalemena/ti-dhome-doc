@@ -115,7 +115,13 @@ The script displays:
 == API Sources
 
 Data is fetched from:
-https://www.services-rte.com/cms/open_data/v1/tempo?season={period}
+
+* link:https://www.services-rte.com/cms/open_data/v1/tempo?season={period}[]
+* link:https://tabular-api.data.gouv.fr/api/resources/0c3d1d36-c412-4620-8566-e5cbb4fa2b5a/data/[]
+
+== Other sources
+
+* link:https://data.rte-france.com/catalog/-/api/consumption/Tempo-Like-Supply-Contract/v1.1[]
 
 == License
 

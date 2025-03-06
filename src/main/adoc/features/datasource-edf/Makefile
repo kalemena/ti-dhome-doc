@@ -1,5 +1,5 @@
 
-TEMPO_SEASON := 2024-2025
+# TEMPO_SEASON := --season 2024-2025
 
 .PHONY: venv setup
 
@@ -15,5 +15,5 @@ tempo-costs:
 	./venv/bin/python tempo-costs.py
 
 tempo-days:
-	./venv/bin/python tempo-days.py --season ${TEMPO_SEASON} --csv
+	./venv/bin/python tempo-days.py ${TEMPO_SEASON} --csv
 
