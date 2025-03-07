@@ -16,12 +16,42 @@ Scripts provide:
 
 The *tempo-days.py* script fetches and displays the Tempo calendar data from RTE (Réseau de Transport d'Électricité) for French electricity supply contracts.
 
-== Overview
+.Links
+* link:https://www.services-rte.com/cms/open_data/v1/tempo?season={period}[]
+
+.Fetch Days using cUrl:
+[source,bash]
+----
+% curl -v https://www.services-rte.com/cms/open_data/v1/tempo?season=2025-2026
+{
+  "values": {
+    "2025-10-14-fallback": "false",
+    "2025-11-29-fallback": "false",
+    "2025-11-14-fallback": "false",
+    "2025-09-06-fallback": "false",
+ ...
+    "2025-12-12": "WHITE",
+    "2025-12-11": "BLUE",
+    "2025-10-01-fallback": "false",
+    "2025-12-14": "BLUE",
+    "2025-12-13": "BLUE",
+    "2025-09-13-fallback": "false",
+    "2025-12-19": "WHITE",
+    "2025-09-07-fallback": "false",
+    "2025-11-06-fallback": "false",
+    "2025-11-12-fallback": "false",
+    "2025-12-21": "BLUE",
+    "2025-12-20": "BLUE"
+  }
+}
+----
+
+=== Overview
 
 The Tempo calendar provides color-coded days indicating the electricity tariff period (blue, white, red) for French households with Tempo contracts.
 This script retrieves the data from RTE's API and can display it or export it to CSV format.
 
-== Features
+=== Features
 
 * Fetches Tempo calendar data from RTE API
 * Displays color-coded days for the specified period
@@ -29,7 +59,7 @@ This script retrieves the data from RTE's API and can display it or export it to
 * Handles date formatting and validation
 * Supports command-line arguments for custom periods
 
-== Usage
+=== Usage
 
 [source,shell]
 ----
@@ -52,7 +82,7 @@ python tempo-days.py --csv
 python tempo-days.py --season "2023-2024"
 ----
 
-== Output
+=== Output
 
 The script displays:
 * Period being queried
