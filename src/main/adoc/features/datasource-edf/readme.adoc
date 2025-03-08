@@ -91,6 +91,8 @@ The script displays:
 
 == EDF - Tempo - Costs
 
+The *tempo-costs.py* script fetches and displays the Tempo costs for the color days from RTE (Réseau de Transport d'Électricité) for French electricity supply contracts.
+
 .Links
 * link:https://www.data.gouv.fr/api/1/datasets/historique-des-tarifs-reglementes-de-vente-delectricite-pour-les-consommateurs-residentiels/[Historique JSON]
 
@@ -134,6 +136,31 @@ The script displays:
     "total": 17
   }
 }
+----
+
+=== Usage
+
+[source,shell]
+----
+python tempo-costs.py
+----
+
+=== Example
+
+[source,shell]
+----
+# Fetch data
+python tempo-costs.py
+
+SUCCESS: Tariff data retrieved:
+ID: 113
+Start Date: 2025-01-08
+Blue HC: 0.1232
+Blue HP: 0.1494
+White HC: 0.1391
+White HP: 0.173
+Red HC: 0.146
+Red HP: 0.6468
 ----
 
 == Requirements
