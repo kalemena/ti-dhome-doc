@@ -17,10 +17,25 @@ Scripts provide:
 The *tempo-days.py* script fetches and displays the Tempo calendar data from RTE (Réseau de Transport d'Électricité) for French electricity supply contracts.
 
 .Links
+* link:https://www.services-rte.com/cms/open_data/v1/tempoLight[]
 * link:https://www.services-rte.com/cms/open_data/v1/tempo?season={period}[]
 
-.Fetch Days using cUrl:
-[source,bash]
+.Fetch few days:
+[source,json]
+----
+% curl -v "https://www.services-rte.com/cms/open_data/v1/tempoLight" | jq .
+{
+  "values": {
+    "2025-12-23-fallback": "false",
+    "2025-12-23": "BLUE",
+    "2025-12-24": "BLUE",
+    "2025-12-24-fallback": "false"
+  }
+}
+----
+
+.Fetch full season days using cUrl:
+[source,json]
 ----
 % curl -v https://www.services-rte.com/cms/open_data/v1/tempo?season=2025-2026
 {
