@@ -1,0 +1,9 @@
+# Metric filter patterns (regular expressions)
+# Only metrics matching these patterns will be included in the analysis
+patterns:
+  - "sensors_"
+  - "opendtu_"
+  # Add more patterns here, e.g.:
+  # - "cpu_"
+  # - "memory.*"
+  # - "network.*"

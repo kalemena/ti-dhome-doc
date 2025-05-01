@@ -1,18 +1,38 @@
 #!/bin/bash
 
 # Victoria Metrics - List all metrics with statistics
-# Usage: ./01-list-metrics.sh <vm-url> [output-file]
+# Usage: ./01-list-metrics.sh <vm-url> [output-file] [filter-file]
 
 set -e
 
 VM_URL="${1:-http://localhost:8428}"
 OUTPUT_FILE="${2:-metrics-report.json}"
+FILTER_FILE="${3:-metrics-filter.yaml}"
 TEMP_DIR="/tmp/vm-migration"
 
 mkdir -p "$TEMP_DIR"
 
 echo "Analyzing Victoria Metrics instance at: $VM_URL"
+echo "Filter patterns file: $FILTER_FILE"
 echo "Output will be saved to: $OUTPUT_FILE"
+
+# Check if filter file exists
+if [ ! -f "$FILTER_FILE" ]; then
+    echo "Warning: Filter file '$FILTER_FILE' not found. Running without filtering."
+    FILTER_PATTERNS=""
+else
+    echo "Loading filter patterns from: $FILTER_FILE"
+    # Extract patterns from YAML file using grep and sed
+    # This extracts lines after "patterns:" that start with "- "
+    FILTER_PATTERNS=$(grep -E '^\s*-\s*"' "$FILTER_FILE" | sed 's/.*"\([^"]*\)".*/\1/' | tr '\n' '|' | sed 's/|$//')
+    
+    if [ -z "$FILTER_PATTERNS" ]; then
+        echo "Warning: No patterns found in filter file. Running without filtering."
+        FILTER_PATTERNS=""
+    else
+        echo "Using filter patterns: $FILTER_PATTERNS"
+    fi
+fi
 
 # Get all metric names
 echo "Fetching all metric names..."
@@ -20,6 +40,18 @@ curl -s "${VM_URL}/api/v1/label/__name__/values" | jq -r '.data[]' > "$TEMP_DIR/
 
 TOTAL_METRICS=$(wc -l < "$TEMP_DIR/all_metrics.txt")
 echo "Found $TOTAL_METRICS unique metrics"
+
+# Filter metrics if patterns are provided
+if [ -n "$FILTER_PATTERNS" ]; then
+    echo "Filtering metrics with pattern: $FILTER_PATTERNS"
+    grep -E "$FILTER_PATTERNS" "$TEMP_DIR/all_metrics.txt" > "$TEMP_DIR/filtered_metrics.txt" || true
+    FILTERED_COUNT=$(wc -l < "$TEMP_DIR/filtered_metrics.txt")
+    echo "Filtered to $FILTERED_COUNT metrics matching the patterns"
+    mv "$TEMP_DIR/filtered_metrics.txt" "$TEMP_DIR/all_metrics.txt"
+    TOTAL_METRICS=$FILTERED_COUNT
+else
+    echo "No filtering applied - analyzing all $TOTAL_METRICS metrics"
+fi
 
 # Initialize report
 cat > "$OUTPUT_FILE" << 'EOF'
