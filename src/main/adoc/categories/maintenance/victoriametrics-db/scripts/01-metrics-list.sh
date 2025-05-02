@@ -83,15 +83,44 @@ while IFS= read -r metric; do
     
     # Query metric data points count
     query_url="${VM_URL}/api/v1/query_range"
-    query_params="query=${metric}&start=${start_time}&end=${end_time}&step=60s"
+    query_params="query=${metric}&start=${start_time}&end=${end_time}&step=5s"
     
     response=$(curl -s "${query_url}?${query_params}" || echo '{"data":{"result":[]}}')
     
-    # Extract series count and approximate data points
+    # Extract series count and count actual data points
     series_count=$(echo "$response" | jq '.data.result | length')
     
-    # Calculate approximate data points (series * time range / step)
-    approx_points=$((series_count * 1440))  # 24h with 60s step = 1440 points per series
+    echo "  Series count for $metric: $series_count"
+    
+    # Count actual data points from the response
+    # Each series has a "values" array with [timestamp, value] pairs
+    total_data_points=$(echo "$response" | jq '[.data.result[].values | length] | add // 0')
+    
+    echo "  Actual data points in response: $total_data_points"
+    
+    # Calculate approximate data points for 24h (estimate based on what we got)
+    # If we got data, estimate what 24h would look like
+    if [ "$total_data_points" -gt 0 ]; then
+        # Get the time range covered by the data
+        first_ts=$(echo "$response" | jq -r '[.data.result[].values[0][0]] | min')
+        last_ts=$(echo "$response" | jq -r '[.data.result[].values[-1][0]] | max')
+        
+        if [ -n "$first_ts" ] && [ "$first_ts" != "null" ]; then
+            time_range_seconds=$((last_ts - first_ts))
+            if [ "$time_range_seconds" -gt 0 ]; then
+                # Estimate total points for full 24h (86400 seconds)
+                approx_points=$((total_data_points * 86400 / time_range_seconds))
+            else
+                approx_points=$total_data_points
+            fi
+        else
+            approx_points=$total_data_points
+        fi
+    else
+        approx_points=0
+    fi
+    
+    echo "  Estimated points for 24h: $approx_points"
     
     # Get first and last timestamps for this metric
     # Query for the earliest data point
@@ -163,11 +192,32 @@ while IFS= read -r metric; do
     labels_response=$(curl -s "${VM_URL}/api/v1/series?match[]=${metric}&start=${start_time}&end=${end_time}" || echo '{"data":[]}')
     unique_labels=$(echo "$labels_response" | jq '[.data[0] // {} | keys] | unique')
     
+    # Calculate estimated size in MB
+    # Victoria Metrics uses efficient compression (~1-2 bytes per data point on average)
+    # We use 2 bytes as a conservative estimate for compressed storage
+    
+    # Calculate full retention size based on actual data retention period
+    if [ -n "$data_retention_days" ] && [ "$data_retention_days" -gt 0 ]; then
+        # Scale 24h estimate to full retention period
+        full_approx_points=$((approx_points * data_retention_days))
+        # Calculate size for full retention period
+        estimated_size_mb=$(echo "$full_approx_points" | jq '(. * 2 / 1048576) | floor')
+        echo "  Estimated size (full retention): $estimated_size_mb MB for ${data_retention_days} days"
+    else
+        # No retention data, use 24h estimate
+        full_approx_points=$approx_points
+        estimated_size_mb=$(echo "$approx_points" | jq '(. * 2 / 1048576) | floor')
+        echo "  Estimated size (24h): $estimated_size_mb MB"
+    fi
+    
     # Add metric info to report
     metric_info=$(jq -n \
         --arg name "$metric" \
         --argjson series_count "$series_count" \
+        --argjson total_data_points "$total_data_points" \
         --argjson approx_points "$approx_points" \
+        --argjson full_approx_points "$full_approx_points" \
+        --argjson estimated_size "$estimated_size_mb" \
         --argjson labels "$unique_labels" \
         --arg first_timestamp "${first_timestamp:-null}" \
         --arg last_timestamp "${last_timestamp:-null}" \
@@ -177,9 +227,12 @@ while IFS= read -r metric; do
         '{
             name: $name,
             series_count: $series_count,
+            actual_data_points_retrieved: $total_data_points,
             approx_data_points_24h: $approx_points,
+            approx_data_points_full_retention: $full_approx_points,
             labels: $labels,
-            estimated_size_mb: ($approx_points * 16 / 1024 / 1024 | floor),
+            estimated_size_mb: $estimated_size,
+            estimated_size_24h_mb: (if $retention_days == "null" or $retention_days == 0 then $estimated_size else (($approx_points * 2 / 1048576) | floor) end),
             first_timestamp: (if $first_timestamp == "null" then null else ($first_timestamp | tonumber) end),
             last_timestamp: (if $last_timestamp == "null" then null else ($last_timestamp | tonumber) end),
             first_date: (if $first_date == "null" then null else $first_date end),
@@ -194,15 +247,17 @@ done < "$TEMP_DIR/all_metrics.txt"
 
 # Generate summary statistics
 jq '.summary = {
-    total_series: ([.metrics[].series_count] | add),
-    total_estimated_points_24h: ([.metrics[].approx_data_points_24h] | add),
-    total_estimated_size_mb: ([.metrics[].estimated_size_mb] | add),
+    total_series: ([.metrics[].series_count] | add // 0),
+    total_estimated_points_24h: ([.metrics[].approx_data_points_24h] | add // 0),
+    total_estimated_points_full_retention: ([.metrics[].approx_data_points_full_retention] | add // 0),
+    total_estimated_size_mb: ([.metrics[].estimated_size_mb // 0] | add),
+    total_estimated_size_24h_mb: ([.metrics[].estimated_size_24h_mb // 0] | add),
     metrics_with_data: ([.metrics[] | select(.series_count > 0)] | length),
-    oldest_data_date: ([.metrics[].first_date | select(. != null)] | min),
-    newest_data_date: ([.metrics[].last_date | select(. != null)] | max),
-    avg_retention_days: ([.metrics[].data_retention_days | select(. != null)] | add / length),
+    oldest_data_date: ([.metrics[].first_date | select(. != null)] | min // "N/A"),
+    newest_data_date: ([.metrics[].last_date | select(. != null)] | max // "N/A"),
+    avg_retention_days: ([.metrics[].data_retention_days | select(. != null)] | if length > 0 then add / length else 0 end),
     top_10_by_series: (.metrics | sort_by(.series_count) | reverse | .[0:10]),
-    top_10_by_size: (.metrics | sort_by(.estimated_size_mb) | reverse | .[0:10]),
+    top_10_by_size: (.metrics | sort_by(.estimated_size_mb // 0) | reverse | .[0:10]),
     top_10_by_retention: (.metrics | sort_by(.data_retention_days // 0) | reverse | .[0:10])
 }' "$OUTPUT_FILE" > "$TEMP_DIR/report_temp.json" && mv "$TEMP_DIR/report_temp.json" "$OUTPUT_FILE"
 
@@ -211,7 +266,9 @@ echo "Summary:"
 jq -r '.summary | "Total metrics: \(.total_series // 0)
 Metrics with data: \(.metrics_with_data // 0)
 Estimated data points (24h): \(.total_estimated_points_24h // 0)
-Estimated size: \(.total_estimated_size_mb // 0) MB
+Estimated data points (full retention): \(.total_estimated_points_full_retention // 0)
+Estimated size (24h): \(.total_estimated_size_24h_mb // 0) MB
+Estimated size (full retention): \(.total_estimated_size_mb // 0) MB
 Oldest data: \(.oldest_data_date // "N/A")
 Newest data: \(.newest_data_date // "N/A")
 Average retention: \(.avg_retention_days // 0 | floor) days"' "$OUTPUT_FILE"
