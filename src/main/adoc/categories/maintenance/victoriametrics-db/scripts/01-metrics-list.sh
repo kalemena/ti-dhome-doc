@@ -5,33 +5,59 @@
 
 set -e
 
-VM_URL="${1:-http://localhost:8428}"
-OUTPUT_FILE="${2:-metrics-report.json}"
-FILTER_FILE="${3:-metrics-filter.yaml}"
+VM_URL="http://localhost:8428"
+OUTPUT_FILE="metrics-report.json"
+# FILTER_FILE="metrics-filter.yaml"
+
+usage() {
+    echo "Usage: $0 [-u <vm-url>] [-o <output-file>] [-f <filter-file>]"
+    echo "  -u: Victoria Metrics URL (default: http://localhost:8428)"
+    echo "  -o: Output JSON report file (default: metrics-report.json)"
+    echo "  -f: Path to filter patterns YAML file"
+    exit 1
+}
+
+while getopts "u:o:f:h" opt; do
+    case "$opt" in
+        u) VM_URL="$OPTARG" ;;
+        o) OUTPUT_FILE="$OPTARG" ;;
+        f) FILTER_FILE="$OPTARG" ;;
+        h|*) usage ;;
+    esac
+done
+
 TEMP_DIR="/tmp/vm-migration"
 
 mkdir -p "$TEMP_DIR"
 
 echo "Analyzing Victoria Metrics instance at: $VM_URL"
-echo "Filter patterns file: $FILTER_FILE"
+if [ -n "$FILTER_FILE" ]; then
+    echo "Filter patterns file: $FILTER_FILE"
+else
+    echo "No filter file specified - processing all metrics"
+fi
 echo "Output will be saved to: $OUTPUT_FILE"
 
-# Check if filter file exists
-if [ ! -f "$FILTER_FILE" ]; then
-    echo "Warning: Filter file '$FILTER_FILE' not found. Running without filtering."
-    FILTER_PATTERNS=""
-else
-    echo "Loading filter patterns from: $FILTER_FILE"
-    # Extract patterns from YAML file using grep and sed
-    # This extracts lines after "patterns:" that start with "- "
-    FILTER_PATTERNS=$(grep -E '^\s*-\s*"' "$FILTER_FILE" | sed 's/.*"\([^"]*\)".*/\1/' | tr '\n' '|' | sed 's/|$//')
-    
-    if [ -z "$FILTER_PATTERNS" ]; then
-        echo "Warning: No patterns found in filter file. Running without filtering."
-        FILTER_PATTERNS=""
+# Check if filter file exists and filter patterns are provided
+FILTER_PATTERNS=""
+if [ -n "$FILTER_FILE" ]; then
+    if [ ! -f "$FILTER_FILE" ]; then
+        echo "Warning: Filter file '$FILTER_FILE' not found. Running without filtering."
     else
-        echo "Using filter patterns: $FILTER_PATTERNS"
+        echo "Loading filter patterns from: $FILTER_FILE"
+        # Extract patterns from YAML file using grep and sed
+        # This extracts lines after "patterns:" that start with "- "
+        FILTER_PATTERNS=$(grep -E '^\s*-\s*"' "$FILTER_FILE" | sed 's/.*"\([^"]*\)".*/\1/' | tr '\n' '|' | sed 's/|$//')
+        
+        if [ -z "$FILTER_PATTERNS" ]; then
+            echo "Warning: No patterns found in filter file. Running without filtering."
+            FILTER_PATTERNS=""
+        else
+            echo "Using filter patterns: $FILTER_PATTERNS"
+        fi
     fi
+else
+    echo "No filter file provided - will process all metrics"
 fi
 
 # Get all metric names

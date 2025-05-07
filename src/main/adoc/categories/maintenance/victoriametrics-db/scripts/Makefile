@@ -11,7 +11,7 @@ VM_URL := http://victoriametrics:8428
 ###########################
 
 vm.metrics-list: 
-	 sh ./01-metrics-list.sh $(VM_URL)
+	 sh ./01-metrics-list.sh -u $(VM_URL)
 
 vm.metrics-render:
 	sh ./01-metrics-render.sh
