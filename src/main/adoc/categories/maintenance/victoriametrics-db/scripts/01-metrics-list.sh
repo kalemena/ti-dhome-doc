@@ -120,7 +120,7 @@ while IFS= read -r metric; do
     
     # Count actual data points from the response
     # Each series has a "values" array with [timestamp, value] pairs
-    total_data_points=$(echo "$response" | jq '[.data.result[].values | length] | add // 0')
+    total_data_points=$(echo "$response" | jq '([.data.result[].values | length] | add // 0) / 2 | floor')
     
     echo "  Actual data points in response: $total_data_points"
     
@@ -227,7 +227,7 @@ while IFS= read -r metric; do
         # Scale 24h estimate to full retention period
         full_approx_points=$((approx_points * data_retention_days))
         # Calculate size for full retention period
-        estimated_size_mb=$(echo "$full_approx_points" | jq '(. * 2 / 1048576) | floor')
+        estimated_size_mb=$(echo "$full_approx_points" | jq '(. / 1048576) | floor')
         echo "  Estimated size (full retention): $estimated_size_mb MB for ${data_retention_days} days"
     else
         # No retention data, use 24h estimate
