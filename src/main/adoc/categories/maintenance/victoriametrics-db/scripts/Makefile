@@ -6,21 +6,16 @@ VM_URL := http://victoriametrics:8428
 VENV_DIR := .venv-metrics
 PYTHON_BIN := $(VENV_DIR)/bin/python
 
-.PHONY: all vm.report vm.metrics-list vm.metrics-render vm.metrics-open venv.setup venv.run-metrics
+.PHONY: all vm.report vm.metrics-list vm.metrics-render vm.metrics-open venv.setup venv.run-metrics venv.clean
 
-all: vm.report
+all: vm.metrics
 
 ###########################
 # Victoriametrics review
 ###########################
 
-vm.report: vm.metrics-list vm.metrics-render
-
-vm.metrics-list: 
-	 sh ./01-metrics-list.sh -u $(VM_URL)
-
-vm.metrics-render:
-	sh ./01-metrics-render.sh
+vm.metrics:
+	$(PYTHON_BIN) ./01-metrics-list.py -u $(VM_URL) --render
 
 vm.metrics-open:
 	open metrics-report.html
@@ -33,12 +28,8 @@ venv.setup:
 	@echo "Setting up Python virtual environment in $(VENV_DIR)..."
 	python3 -m venv $(VENV_DIR)
 	@echo "Installing required packages..."
-	$(PYTHON_BIN) -m pip install --upgrade pip requests
+	$(PYTHON_BIN) -m pip install --upgrade pip requests jinja2
 	@echo "Virtual environment ready at $(VENV_DIR)"
-
-venv.run-metrics: venv.setup
-	@echo "Running metrics list script..."
-	$(PYTHON_BIN) ./01-metrics-list.py -u $(VM_URL)
 
 venv.clean:
 	@echo "Removing virtual environment..."

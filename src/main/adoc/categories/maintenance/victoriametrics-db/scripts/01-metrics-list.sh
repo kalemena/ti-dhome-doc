@@ -5,13 +5,13 @@
 
 set -e
 
-VM_URL="http://localhost:8428"
+VM_URL="http://victoriamertics:8428"
 OUTPUT_FILE="metrics-report.json"
 # FILTER_FILE="metrics-filter.yaml"
 
 usage() {
     echo "Usage: $0 [-u <vm-url>] [-o <output-file>] [-f <filter-file>]"
-    echo "  -u: Victoria Metrics URL (default: http://localhost:8428)"
+    echo "  -u: Victoria Metrics URL (default: http://victoriamertics:8428)"
     echo "  -o: Output JSON report file (default: metrics-report.json)"
     echo "  -f: Path to filter patterns YAML file"
     exit 1

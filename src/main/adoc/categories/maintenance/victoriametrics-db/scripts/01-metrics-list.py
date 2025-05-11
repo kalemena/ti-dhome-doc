@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Victoria Metrics - List all metrics with statistics
-Usage: ./01-metrics-list.py [-u <vm-url>] [-o <output-file>] [-f <filter-file>]
+Usage: ./01-metrics-list.py [-u <vm-url>] [-o <output-file>] [-f <filter-file>] [--render] [--html-output <path>] [--template <path>]
 """
 
 import argparse
@@ -11,19 +11,24 @@ import re
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
+from functools import reduce
 from typing import Any
 
 import requests
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="List all Victoria Metrics metrics with statistics"
     )
-    parser.add_argument("-u", "--url", default="http://localhost:8428")
+    parser.add_argument("-u", "--url", default="http://victoriametrics:8428")
     parser.add_argument("-o", "--output", default="metrics-report.json")
     parser.add_argument("-f", "--filter", help="Path to filter patterns YAML file")
     parser.add_argument("--parallel", type=int, default=None, help="Number of parallel workers")
+    parser.add_argument("--render", action="store_true", help="Generate HTML report after JSON output")
+    parser.add_argument("--html-output", default=None, help="Output path for HTML report (default: <json-output>.html)")
+    parser.add_argument("--template", default=None, help="Custom Jinja2 template path")
     return parser.parse_args()
 
 
@@ -216,6 +221,38 @@ def process_metric_parallel(args_tuple: tuple) -> dict[str, Any]:
     return get_metric_stats(session, vm_url, metric, end_time)
 
 
+def render_html(report: dict[str, Any], output_path: str, template_path: str | None) -> None:
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+
+    if template_path:
+        template_dir = os.path.dirname(os.path.abspath(template_path))
+        template_name = os.path.basename(template_path)
+    else:
+        template_dir = script_dir
+        template_name = "01-metrics-report.html.j2"
+
+    env = Environment(
+        loader=FileSystemLoader(template_dir),
+        autoescape=select_autoescape(['html', 'xml'])
+    )
+    env.filters['default'] = lambda val, default: val if val is not None else default
+
+    template = env.get_template(template_name)
+
+    html_content = template.render(
+        vm_instance=report.get('vm_instance', 'N/A'),
+        analysis_timestamp=report.get('analysis_timestamp', 'N/A'),
+        total_metrics=report.get('total_metrics', 0),
+        summary=report.get('summary', {}),
+        json_data=report
+    )
+
+    with open(output_path, 'w') as f:
+        f.write(html_content)
+
+    print(f"HTML report generated: {output_path}")
+
+
 def main() -> int:
     args = parse_args()
 
@@ -356,6 +393,14 @@ def main() -> int:
     except IOError as e:
         print(f"Error writing report file: {e}")
         return 1
+
+    if args.render:
+        html_output = args.html_output if args.html_output else args.output.replace('.json', '.html')
+        try:
+            render_html(report, html_output, args.template)
+        except Exception as e:
+            print(f"Error generating HTML report: {e}")
+            return 1
 
     return 0
 

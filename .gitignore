@@ -1,2 +1,4 @@
 metrics-report.html
 metrics-report.json
+
+*.pyc
