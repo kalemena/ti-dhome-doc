@@ -223,6 +223,55 @@
             font-size: 12px;
         }
 
+        .chart-section {
+            display: flex;
+            gap: 30px;
+            flex-wrap: wrap;
+        }
+
+        .chart-container {
+            flex: 1;
+            min-width: 400px;
+            max-width: 600px;
+        }
+
+        .chart-container canvas {
+            max-height: 400px;
+        }
+
+        .group-legend {
+            flex: 1;
+            min-width: 300px;
+        }
+
+        .group-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 15px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .group-item:last-child {
+            border-bottom: none;
+        }
+
+        .group-name {
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+
+        .group-stats {
+            text-align: right;
+            font-size: 12px;
+            color: #666;
+        }
+
+        .group-stats strong {
+            color: #3498db;
+        }
+
         @media (max-width: 768px) {
             .container {
                 padding: 10px;
@@ -290,6 +339,18 @@
         </div>
 
         <div class="section">
+            <div class="section-header">Storage by Metric Group</div>
+            <div class="section-content">
+                <div class="chart-section">
+                    <div class="chart-container">
+                        <canvas id="sizeDonutChart"></canvas>
+                    </div>
+                    <div class="group-legend" id="groupLegend"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
             <div class="section-header">Top Metrics</div>
             <div class="section-content">
                 <div class="top-metrics">
@@ -341,6 +402,7 @@
         </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script>
         const jsonData = {{ json_data | tojson }};
 
@@ -402,6 +464,70 @@
             filterAndRender();
         }
 
+        const CHART_COLORS = [
+            '#3498db', '#e74c3c', '#2ecc71', '#f39c12', '#9b59b6',
+            '#1abc9c', '#34495e', '#e67e22', '#16a085', '#c0392b',
+            '#27ae60', '#2980b9', '#8e44ad', '#f1c40f', '#d35400',
+            '#7f8c8d', '#006266', '#bdc3c7', '#535c68', '#45aaf2'
+        ];
+
+        function renderSizeDonutChart() {
+            const groups = jsonData.summary?.groups_by_size || [];
+            if (groups.length === 0) return;
+
+            const totalSize = groups.reduce((sum, g) => sum + g.total_size_mb, 0);
+
+            const labels = groups.map(g => g.name);
+            const data = groups.map(g => g.total_size_mb);
+            const percentages = groups.map(g => ((g.total_size_mb / totalSize) * 100).toFixed(1));
+
+            const ctx = document.getElementById('sizeDonutChart').getContext('2d');
+            new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: data,
+                        backgroundColor: CHART_COLORS.slice(0, groups.length),
+                        borderColor: '#fff',
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const value = context.raw;
+                                    const pct = percentages[context.dataIndex];
+                                    return `${context.label}: ${formatNumber(value)} MB (${pct}%)`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            const legendContainer = document.getElementById('groupLegend');
+            legendContainer.innerHTML = groups.map((g, i) => `
+                <div class="group-item" style="border-left: 4px solid ${CHART_COLORS[i % CHART_COLORS.length]}">
+                    <div>
+                        <div class="group-name">${g.name}_*</div>
+                        <div class="group-stats">${g.metric_count} metrics, ${formatNumber(g.total_series)} series</div>
+                    </div>
+                    <div style="text-align: right;">
+                        <strong>${formatNumber(g.total_size_mb)} MB</strong>
+                        <div class="group-stats">${percentages[i]}%</div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
         if (jsonData.summary) {
             renderTopMetrics('top-by-series', jsonData.summary.top_10_by_series, 'series_count');
             renderTopMetrics('top-by-size', jsonData.summary.top_10_by_size, 'estimated_size_mb', ' MB');
@@ -409,6 +535,7 @@
         }
 
         renderMetricsTable();
+        renderSizeDonutChart();
     </script>
 </body>
 </html>

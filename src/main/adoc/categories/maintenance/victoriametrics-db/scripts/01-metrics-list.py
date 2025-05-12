@@ -221,6 +221,32 @@ def process_metric_parallel(args_tuple: tuple) -> dict[str, Any]:
     return get_metric_stats(session, vm_url, metric, end_time)
 
 
+def get_metric_group(metric_name: str) -> str:
+    if '_' in metric_name:
+        return metric_name.split('_')[0]
+    return metric_name
+
+
+def compute_group_stats(metrics: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    groups: dict[str, dict[str, Any]] = {}
+    for m in metrics:
+        group = get_metric_group(m['name'])
+        if group not in groups:
+            groups[group] = {
+                'name': group,
+                'metric_count': 0,
+                'total_series': 0,
+                'total_size_mb': 0,
+                'total_points_24h': 0
+            }
+        groups[group]['metric_count'] += 1
+        groups[group]['total_series'] += m.get('series_count', 0)
+        groups[group]['total_size_mb'] += m.get('estimated_size_mb', 0)
+        groups[group]['total_points_24h'] += m.get('approx_data_points_24h', 0)
+
+    return sorted(groups.values(), key=lambda x: x['total_size_mb'], reverse=True)
+
+
 def render_html(report: dict[str, Any], output_path: str, template_path: str | None) -> None:
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -244,6 +270,7 @@ def render_html(report: dict[str, Any], output_path: str, template_path: str | N
         analysis_timestamp=report.get('analysis_timestamp', 'N/A'),
         total_metrics=report.get('total_metrics', 0),
         summary=report.get('summary', {}),
+        groups_by_size=report.get('summary', {}).get('groups_by_size', []),
         json_data=report
     )
 
@@ -370,7 +397,8 @@ def main() -> int:
             "avg_retention_days": int(avg_retention),
             "top_10_by_series": sorted(results, key=lambda x: x.get('series_count', 0), reverse=True)[:10],
             "top_10_by_size": sorted(results, key=lambda x: x.get('estimated_size_mb', 0), reverse=True)[:10],
-            "top_10_by_retention": sorted(results, key=lambda x: x.get('data_retention_days', 0) or 0, reverse=True)[:10]
+            "top_10_by_retention": sorted(results, key=lambda x: x.get('data_retention_days', 0) or 0, reverse=True)[:10],
+            "groups_by_size": compute_group_stats(results)
         }
     }
 

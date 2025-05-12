@@ -2,3 +2,4 @@ metrics-report.html
 metrics-report.json
 
 *.pyc
+.DS_Store
