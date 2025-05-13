@@ -6,7 +6,7 @@ VM_URL := http://victoriametrics:8428
 VENV_DIR := .venv-metrics
 PYTHON_BIN := $(VENV_DIR)/bin/python
 
-.PHONY: all vm.report vm.metrics-list vm.metrics-render vm.metrics-open venv.setup venv.run-metrics venv.clean
+.PHONY: all vm.metrics vm.metrics-open venv.setup venv.clean
 
 all: vm.metrics
 
@@ -15,7 +15,7 @@ all: vm.metrics
 ###########################
 
 vm.metrics:
-	$(PYTHON_BIN) ./01-metrics-list.py -u $(VM_URL) --render
+	$(PYTHON_BIN) ./01-metrics-report.py -u $(VM_URL) --render
 
 vm.metrics-open:
 	open metrics-report.html
