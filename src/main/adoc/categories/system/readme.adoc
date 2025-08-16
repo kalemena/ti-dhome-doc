@@ -1,0 +1,7 @@
+= System Installation
+:hardbreaks:
+
+[IMPORTANT]
+====
+Below is only an example of setup.
+====
