@@ -5,3 +5,17 @@
 ====
 Below is only an example of setup.
 ====
+
+== Hardware
+
+link:https://www.hardkernel.com/shop/odroid-m1s-with-8gbyte-ram/[Odroid M1S]
+
+.Specification Hardware
+* CPU RK3566: ARM Cortex-A55 with 4 cores
+* 8G RAM
+* 64G eMMC
+* on-board M.2 NVMe slot
+
+.Specification Power
+* 0.8-3.5 Watt
+
