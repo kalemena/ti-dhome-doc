@@ -19,3 +19,30 @@ link:https://www.hardkernel.com/shop/odroid-m1s-with-8gbyte-ram/[Odroid M1S]
 .Specification Power
 * 0.8-3.5 Watt
 
+== OS setup
+
+.Image Download
+* link:https://armbian.com/fr/boards/odroidm1s[Armbian]
+
+.Flash
+* Use *Armbian Imager*, select board, and Debian Trixie image, Flash on SD-card
+
+.Install on eMMC and customize
+* On Board:
+** insert SD-card
+** connect keyboard,screen,network,power
+* Boot shows on screen
+* Set root password when asked
+* Create user and set password when asked
+
+[source,bash]
+----
+$ armbian-config
+
+# Select System and enter menus to flash on internal disk eMMC (64G)
+
+# Reboot
+
+# Run again the config tool, and change keyboard layout, local, etc
+----
+
