@@ -1,0 +1,148 @@
+= Core Services
+:hardbreaks:
+
+[IMPORTANT]
+====
+Core services are the base of the home automation project.
+They are deployed as Docker containers on the home server.
+====
+
+Below is the list of core services to deploy, with the configuration used in this project.
+
+.Services
+* *MQTT broker* (Eclipse Mosquitto): central message bus used by all devices and services
+* *Node-RED*: automation engine, ingesting and routing data between services
+* *Victoria Metrics*: time-series database storing all metrics (Prometheus compatible)
+
+== Architecture
+
+All services expose their data over MQTT or HTTP and are linked together for example as follows:
+
+* Teleinfo (Linky) -> Node-RED -> MQTT
+* Zigbee energy meters -> Zigbee2MQTT -> MQTT
+* OpenDTU (solar inverter) -> MQTT
+* Node-RED -> Victoria Metrics (scraped / pushed)
+* Grafana -> Victoria Metrics
+
+== Deployment
+
+Services are deployed with *Docker*, following the container names of the project:
+`ti-dhome_<service>_1` with `docker-compose` (project name *ti-dhome*).
+
+== MQTT broker (Mosquitto)
+
+The MQTT broker is the central message bus. Every device and service publishes to and
+subscribes from topics on this broker.
+
+.Docker image
+* link:https://hub.docker.com/_/eclipse-mosquitto[eclipse-mosquitto]
+
+.Mosquitto configuration (/etc/mosquitto/mosquitto.conf)
+[source,conf]
+----
+persistence true
+persistence_location /mosquitto/data/
+log_dest file /mosquitto/log/mosquitto.log
+
+listener 1883
+allow_anonymous false
+password_file /mosquitto/config/password.txt
+
+# Websocket (used by tools such as Node-RED dashboard, or MQTT clients)
+listener 9001
+protocol websockets
+allow_anonymous false
+password_file /mosquitto/config/password.txt
+----
+
+.Create password file
+[source,bash]
+----
+$ docker run --rm -it -v $PWD/mosquitto/data:/mosquitto/data -v $PWD/mosquitto/log:/mosquitto/log -v $PWD/mosquitto/config:/mosquitto/config eclipse-mosquitto mosquitto_passwd -c /mosquitto/config/password.txt <user>
+----
+
+.Verify broker is up
+[source,bash]
+----
+$ docker exec -it <container_id> mosquitto_sub -t '#' -v
+----
+
+== Node-RED
+
+Node-RED is the automation engine. It connects the data sources to the rest of the
+stack (MQTT publish, HTTP calls, metric forwarding to Victoria Metrics).
+
+.Docker image
+* link:https://hub.docker.com/r/nodered/node-red[nodered/node-red]
+
+.Node-RED launch
+[source,bash]
+----
+$ docker run -d --name ti-dhome_node-red_1 \
+    -p 1880:1880 \
+    -e TZ=Europe/Paris \
+    -v node-red-data:/data \
+    nodered/node-red
+----
+
+.Deployed flows
+* Teleinfo reader: consumes serial frames from Linky and publishes Power (W) and
+  Energy (kWh) metrics to MQTT topics `teleinfo/#`
+* Metric router: subscribes to `teleinfo/#`, `zigbee/#`, `opendtu/#` and forwards
+  measurements to Victoria Metrics
+
+.MQTT topics used
+* `teleinfo/PAPP` - Instantaneous power (W)
+* `teleinfo/BBRHCJB` - Blue HC counter (Wh)
+* `teleinfo/BBRHPJB` - Blue HP counter (Wh)
+* `teleinfo/BBRHCJW` - White HC counter (Wh)
+* `teleinfo/BBRHPJW` - White HP counter (Wh)
+* `teleinfo/BBRHCJR` - Red HC counter (Wh)
+* `teleinfo/BBRHPJR` - Red HP counter (Wh)
+
+== Victoria Metrics
+
+Victoria Metrics is the time-series database used to store all metrics.
+It is Prometheus compatible and used as the datasource for Grafana and the
+*Mathematics* category analysis.
+
+.Docker image
+* link:https://hub.docker.com/r/victoriametrics/victoria-metrics[victoriametrics/victoria-metrics]
+
+.Victoria Metrics launch
+[source,bash]
+----
+$ docker run -d --name ti-dhome_victoriametrics_1 \
+    -p 8428:8428 \
+    -v victoria-metrics-data:/victoria-metrics-data \
+    victoriametrics/victoria-metrics \
+    -retentionPeriod=12 \
+    -storageDataPath=/victoria-metrics-data
+----
+
+.Endpoints
+* `http://localhost:8428/` - VMUI interface for querying
+* `http://localhost:8428/metrics` - Prometheus metrics endpoint
+* `http://localhost:8428/api/v1/query` - HTTP API
+
+.Metrics written
+.Example metrics
+[source,text]
+----
+teleinfo_PAPP{location="main"}
+teleinfo_BBRHPJB{location="main"}
+zigbee_energy_b{location="Garage~PowerMeter"}
+zigbee_energy_produced_b{location="Garage~PowerMeter"}
+opendtu_YieldTotal{type="AC"}
+sensors_*
+----
+
+== Maintenance
+
+* Victoria Metrics backup, restore and migration toolkit: see *Maintenance - Victoria Metrics* category
+
+== References
+
+* link:https://mosquitto.org[Eclipse Mosquitto]
+* link:https://nodered.org/docs[Node-RED docs]
+* link:https://docs.victoriametrics.com[Victoria Metrics docs]
