@@ -14,6 +14,9 @@ Below is the list of core services to deploy, with the configuration used in thi
 * *Node-RED*: automation engine, ingesting and routing data between services
 * *Victoria Metrics*: time-series database storing all metrics (Prometheus compatible)
 
+A ready-to-deploy stack (Docker Compose + Makefile wrapping setup and management) is provided
+in the `samples/core` folder of this repository.
+
 == Architecture
 
 All services expose their data over MQTT or HTTP and are linked together for example as follows:
@@ -26,64 +29,35 @@ All services expose their data over MQTT or HTTP and are linked together for exa
 
 == Deployment
 
-Services are deployed with *Docker*, following the container names of the project:
-`ti-dhome_<service>_1` with `docker-compose` (project name *ti-dhome*).
+The three services are deployed together as one stack with *Docker Compose*.
+Container names follow the project convention `ti-dhome_<service>_1` and the stack is attached
+to a dedicated `ti-dhome` docker network so that services reach each other by service name
+(`mqtt`, `nodered`, `victoriametrics`).
+
+Persistent data is kept in Docker *named volumes*, one per service. This isolates the data of
+each service and makes backup, restore and upgrade straightforward: upgrading an image or
+recreating a container never destroys the data.
+
+The stack management is delegated to a *Makefile* (`make up`, `make down`, `make setup`,
+`make logs`, ...): see the `samples/core` README for the full command list.
 
 == MQTT broker (Mosquitto)
 
 The MQTT broker is the central message bus. Every device and service publishes to and
-subscribes from topics on this broker.
+subscribes from topics on this broker. It is the single point the whole project talks through:
+data producers (teleinfo, Zigbee meters, OpenDTU) publish, and consumers (Node-RED,
+dashboards) subscribe.
 
-.Docker image
-* link:https://hub.docker.com/_/eclipse-mosquitto[eclipse-mosquitto]
+.Two listeners
+* Port 1883 for standard MQTT clients
+* Port 9001 in *WebSocket* mode for browser-based clients and dashboards
 
-.Mosquitto configuration (/etc/mosquitto/mosquitto.conf)
-[source,conf]
-----
-persistence true
-persistence_location /mosquitto/data/
-log_dest file /mosquitto/log/mosquitto.log
-
-listener 1883
-allow_anonymous false
-password_file /mosquitto/config/password.txt
-
-# Websocket (used by tools such as Node-RED dashboard, or MQTT clients)
-listener 9001
-protocol websockets
-allow_anonymous false
-password_file /mosquitto/config/password.txt
-----
-
-.Create password file
-[source,bash]
-----
-$ docker run --rm -it -v $PWD/mosquitto/data:/mosquitto/data -v $PWD/mosquitto/log:/mosquitto/log -v $PWD/mosquitto/config:/mosquitto/config eclipse-mosquitto mosquitto_passwd -c /mosquitto/config/password.txt <user>
-----
-
-.Verify broker is up
-[source,bash]
-----
-$ docker exec -it <container_id> mosquitto_sub -t '#' -v
-----
+The broker keeps persistence enabled: retained messages and client sessions survive restarts.
 
 == Node-RED
 
-Node-RED is the automation engine. It connects the data sources to the rest of the
-stack (MQTT publish, HTTP calls, metric forwarding to Victoria Metrics).
-
-.Docker image
-* link:https://hub.docker.com/r/nodered/node-red[nodered/node-red]
-
-.Node-RED launch
-[source,bash]
-----
-$ docker run -d --name ti-dhome_node-red_1 \
-    -p 1880:1880 \
-    -e TZ=Europe/Paris \
-    -v node-red-data:/data \
-    nodered/node-red
-----
+Node-RED is the automation engine. It connects the data sources to the rest of the stack by
+subscribing to MQTT, routing and transforming the data before sending it to Victoria Metrics.
 
 .Deployed flows
 * Teleinfo reader: consumes serial frames from Linky and publishes Power (W) and
@@ -106,24 +80,11 @@ Victoria Metrics is the time-series database used to store all metrics.
 It is Prometheus compatible and used as the datasource for Grafana and the
 *Mathematics* category analysis.
 
-.Docker image
-* link:https://hub.docker.com/r/victoriametrics/victoria-metrics[victoriametrics/victoria-metrics]
+The instance is configured with a *retention period* (how long metrics are kept) and exposes:
 
-.Victoria Metrics launch
-[source,bash]
-----
-$ docker run -d --name ti-dhome_victoriametrics_1 \
-    -p 8428:8428 \
-    -v victoria-metrics-data:/victoria-metrics-data \
-    victoriametrics/victoria-metrics \
-    -retentionPeriod=12 \
-    -storageDataPath=/victoria-metrics-data
-----
-
-.Endpoints
-* `http://localhost:8428/` - VMUI interface for querying
-* `http://localhost:8428/metrics` - Prometheus metrics endpoint
-* `http://localhost:8428/api/v1/query` - HTTP API
+* A UI (VMUI) for ad-hoc querying
+* A Prometheus-compatible read API (`/api/v1/query`) used by Grafana
+* A write API used by Node-RED and other scrapers/exporters
 
 .Metrics written
 .Example metrics
@@ -136,6 +97,37 @@ zigbee_energy_produced_b{location="Garage~PowerMeter"}
 opendtu_YieldTotal{type="AC"}
 sensors_*
 ----
+
+== Security
+
+Security is enforced by the following principles:
+
+.Device authentication (MQTT)
+The broker runs with *anonymous access disabled*. Every client (teleinfo, Zigbee, OpenDTU,
+Node-RED) must authenticate with a user/password pair stored in the broker password file.
+The password file is created once during setup and is *not* committed to version control.
+
+.Listener separation
+Standard MQTT and WebSocket listeners are both protected, so browser-based access requires
+the same credentials as device access.
+
+.Bound ports
+Only the reachable endpoints are published to the host: MQTT (1883), MQTT WebSocket (9001),
+Node-RED (1880), Victoria Metrics (8428). Services communicate internally through the
+`ti-dhome` docker network and are not exposed beyond the host.
+
+.Sensitive services
+Node-RED and Victoria Metrics provide no built-in authentication. They are meant to stay on a
+trusted network, and any access beyond the host should be put behind a reverse proxy with
+authentication and TLS.
+
+.Data isolation
+Each service owns a dedicated Docker volume. Credentials, flows and metrics stay isolated
+between services, which simplifies backup and limits the blast radius of a compromise.
+
+.Granular access (optional)
+For stricter setups, the broker supports ACL files to restrict which topics each user may
+publish to or subscribe from, so a compromised device cannot read or forge other topics.
 
 == Maintenance
 
