@@ -30,8 +30,9 @@ All services expose their data over MQTT or HTTP and are linked together for exa
 == Deployment
 
 The three services are deployed together as one stack with *Docker Compose*.
-Container names follow the project convention `ti-dhome_<service>_1` and the stack is attached
-to a dedicated `ti-dhome` docker network so that services reach each other by service name
+The project name is defined in `.env` (`COMPOSE_PROJECT_NAME=ti-dhome`) and prefixes all
+auto-generated resources: containers (`ti-dhome-mqtt-1`), volumes (`ti-dhome_mosquitto-data`)
+and the dedicated `ti-dhome` docker network. Services reach each other by service name
 (`mqtt`, `nodered`, `victoriametrics`).
 
 Persistent data is kept in Docker *named volumes*, one per service. This isolates the data of

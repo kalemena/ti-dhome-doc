@@ -96,6 +96,15 @@ A Victoria Metrics backup should be taken first (see the *Maintenance* category)
 
 ### Networking
 
+The project name `ti-dhome` is defined in `.env` via `COMPOSE_PROJECT_NAME`.
+It prefixes all auto-generated resource names:
+
+| Pattern | Example |
+|---|---|
+| Container | `ti-dhome-<service>-1` (`ti-dhome-mqtt-1`) |
+| Volume | `ti-dhome_<volume>` (`ti-dhome_mosquitto-data`) |
+| Network | `ti-dhome` (explicit `name:`) |
+
 Each service joins the `ti-dhome` network and can reach the others by service
 name (`mqtt`, `nodered`, `victoriametrics`). Ports are published to the host so
 external devices and dashboards can connect.

@@ -2,7 +2,6 @@ services:
 
   mqtt:
     image: eclipse-mosquitto:2.1.2-alpine
-    container_name: ti-dhome_mqtt_1
     restart: unless-stopped
     ports:
       - "1883:1883"
@@ -16,7 +15,6 @@ services:
 
   nodered:
     image: nodered/node-red:5.0.6
-    container_name: ti-dhome_node-red_1
     restart: unless-stopped
     environment:
       - TZ=Europe/Paris
@@ -31,7 +29,6 @@ services:
 
   victoriametrics:
     image: victoriametrics/victoria-metrics:v1.151.0
-    container_name: ti-dhome_victoriametrics_1
     restart: unless-stopped
     ports:
       - "8428:8428"
