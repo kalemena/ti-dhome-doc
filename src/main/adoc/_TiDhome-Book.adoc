@@ -32,6 +32,15 @@ endif::[]
 
 include::readme.adoc[General Info]
 
+== Table of Content
+
+* xref:categories/system/readme.adoc[System Installation]
+* xref:categories/core-services/readme.adoc[Core Services]
+* xref:categories/datasource-edf/readme.adoc[EDF - Tempo - Scripts]
+* xref:categories/mathematics/readme.adoc[Mathematics]
+* xref:categories/maintenance/victoriametrics-db/readme.adoc[Victoria Metrics - Backup & Restore]
+
+
 // <<<
 // :leveloffset: +1
 // include::includes/_cross-references.adoc[]
