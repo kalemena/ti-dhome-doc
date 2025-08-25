@@ -40,6 +40,13 @@ include::readme.adoc[General Info]
 * xref:categories/mathematics/readme.adoc[Mathematics]
 * xref:categories/maintenance/victoriametrics-db/readme.adoc[Victoria Metrics - Backup & Restore]
 
+:leveloffset: +1
+include::categories/system/readme.adoc[System Installation]
+include::categories/core-services/readme.adoc[Core Services]
+include::categories/datasource-edf/readme.adoc[EDF - Tempo - Scripts]
+include::categories/mathematics/readme.adoc[Mathematics]
+include::categories/maintenance/victoriametrics-db/readme.adoc[Victoria Metrics - Backup & Restore]
+:leveloffset: -1
 
 // <<<
 // :leveloffset: +1

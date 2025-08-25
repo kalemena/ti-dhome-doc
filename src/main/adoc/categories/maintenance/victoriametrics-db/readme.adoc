@@ -50,7 +50,7 @@ $ export BACKUP_DATE=$(date '+%Y-%m-%d')
 $ export BACKUP_FOLDER=/backups/victoriametrics
 
 # Stopping and preventing data ingestion
-$ docker stop ti-dhome_victoriametrics_1
+$ docker stop ti-dhome-victoriametrics-1
 
 # Preparing destination
 $ mkdir -p $(WORKSPACE)/backup/victoriametrics
@@ -82,5 +82,5 @@ $ docker run --rm -it \
 [source, bash]
 ----
 # Restart DB for data ingestion
-$ docker start ti-dhome_victoriametrics_1
+$ docker start ti-dhome-victoriametrics-1
 ----
