@@ -46,6 +46,23 @@ $ armbian-config
 # Run again the config tool, and change keyboard layout, local, etc
 ----
 
+== Prepare for home automation
+
+.Create service user
+
+[source,bash]
+----
+# Create the user which will run the stack
+$ useradd -m -s /bin/bash homeautomation
+
+# Set its password
+$ passwd homeautomation
+
+# Prepare: add to docker group so it can run containers
+$ usermod -aG docker homeautomation
+----
+
+
 == Services
 
 .Tooling
