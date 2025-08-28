@@ -1,20 +1,21 @@
 services:
 
   mqtt:
+    # https://hub.docker.com/_/eclipse-mosquitto/
     image: eclipse-mosquitto:2.1.2-alpine
     restart: unless-stopped
     ports:
       - "1883:1883"
       - "9001:9001"
     volumes:
-      - mosquitto-data:/mosquitto/data
-      - mosquitto-log:/mosquitto/log
+      - ./mosquitto/data:/mosquitto/data
+      - ./mosquitto/log:/mosquitto/log
       - ./mosquitto/config:/mosquitto/config:ro
     networks:
       - ti-dhome
 
   nodered:
-    image: nodered/node-red:5.0.6
+    image: nodered/node-red:5.0.7
     restart: unless-stopped
     environment:
       - TZ=Europe/Paris
@@ -43,8 +44,6 @@ services:
       - mqtt
 
 volumes:
-  mosquitto-data:
-  mosquitto-log:
   node-red-data:
   victoria-metrics-data:
 
