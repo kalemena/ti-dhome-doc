@@ -7,7 +7,7 @@ MOSQUITTO_IMAGE := eclipse-mosquitto:2.1.2-alpine
 PASSWORD_FILE := mosquitto/config/password.txt
 MOSQUITTO_USER := mosquitto
 
-.PHONY: help setup mosquitto-dirs password pull up down start stop restart status logs ps config prune rm-volumes clean
+.PHONY: help setup mosquitto-dirs password pull up down start stop restart status logs ps backup config prune rm-volumes clean
 
 ###############################
 # SETUP
@@ -76,6 +76,15 @@ logs:
 
 ## ps: alias of status
 ps: status
+
+###############################
+# BACKUP
+###############################
+
+## backup: create a tarball of the Mosquitto data/log/config
+backup:
+	@tar -czf mosquitto-backup-$$(date +%Y%m%d-%H%M%S).tgz mosquitto/data mosquitto/log mosquitto/config
+	@echo "Backup created."
 
 ###############################
 # VALIDATION & CLEANUP
