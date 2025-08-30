@@ -7,7 +7,7 @@ MOSQUITTO_IMAGE := eclipse-mosquitto:2.1.2-alpine
 PASSWORD_FILE := mosquitto/config/password.txt
 MOSQUITTO_USER := mosquitto
 
-.PHONY: help setup mosquitto-dirs password pull up down start stop restart status logs ps backup config prune rm-volumes clean
+.PHONY: help setup mosquitto-dirs password pull up down start stop restart status logs ps backup restore config prune rm-volumes clean
 
 ###############################
 # SETUP
@@ -85,6 +85,15 @@ ps: status
 backup:
 	@tar -czf mosquitto-backup-$$(date +%Y%m%d-%H%M%S).tgz mosquitto/data mosquitto/log mosquitto/config
 	@echo "Backup created."
+
+## restore: restore data/log/config from a tarball (run make restore FILE=backup.tgz)
+restore:
+	@test -n "$(FILE)" || (echo "Usage: make restore FILE=mosquitto-backup-<timestamp>.tgz" && exit 1)
+	@test -f "$(FILE)" || (echo "File not found: $(FILE)" && exit 1)
+	@docker-compose -f $(COMPOSE_FILE) stop mqtt
+	@tar -xzf $(FILE) -C $(WORKSPACE) mosquitto/data mosquitto/log mosquitto/config
+	@echo "Restore done."
+	@echo "Start the stack with: make up"
 
 ###############################
 # VALIDATION & CLEANUP
