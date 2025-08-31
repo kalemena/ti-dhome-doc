@@ -3,3 +3,5 @@ mosquitto/config/password.txt
 # Mosquitto runtime data (bind-mounted, created by `make setup`)
 mosquitto/data/
 mosquitto/log/
+# Mosquitto backups (created by `make backup`)
+backup/

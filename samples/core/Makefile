@@ -6,6 +6,7 @@ COMPOSE_FILE := docker-compose.yml
 MOSQUITTO_IMAGE := eclipse-mosquitto:2.1.2-alpine
 PASSWORD_FILE := mosquitto/config/password.txt
 MOSQUITTO_USER := mosquitto
+BACKUP_DIR := backup
 
 .PHONY: help setup mosquitto-dirs password pull up down start stop restart status logs ps backup restore config prune rm-volumes clean
 
@@ -81,14 +82,15 @@ ps: status
 # BACKUP
 ###############################
 
-## backup: create a tarball of the Mosquitto data/log/config
+## backup: create a tarball of the Mosquitto data/log/config into backup/
 backup:
-	@tar -czf mosquitto-backup-$$(date +%Y%m%d-%H%M%S).tgz mosquitto/data mosquitto/log mosquitto/config
-	@echo "Backup created."
+	@mkdir -p $(BACKUP_DIR)
+	@tar -czf $(BACKUP_DIR)/mosquitto-backup-$$(date +%Y%m%d-%H%M%S).tgz mosquitto/data mosquitto/log mosquitto/config
+	@echo "Backup created in $(BACKUP_DIR)/"
 
-## restore: restore data/log/config from a tarball (run make restore FILE=backup.tgz)
+## restore: restore data/log/config from a tarball (run make restore FILE=backup/xxx.tgz)
 restore:
-	@test -n "$(FILE)" || (echo "Usage: make restore FILE=mosquitto-backup-<timestamp>.tgz" && exit 1)
+	@test -n "$(FILE)" || (echo "Usage: make restore FILE=$(BACKUP_DIR)/mosquitto-backup-<timestamp>.tgz" && exit 1)
 	@test -f "$(FILE)" || (echo "File not found: $(FILE)" && exit 1)
 	@docker-compose -f $(COMPOSE_FILE) stop mqtt
 	@tar -xzf $(FILE) -C $(WORKSPACE) mosquitto/data mosquitto/log mosquitto/config
