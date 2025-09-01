@@ -6,9 +6,14 @@ COMPOSE_FILE := docker-compose.yml
 MOSQUITTO_IMAGE := eclipse-mosquitto:2.1.2-alpine
 PASSWORD_FILE := mosquitto/config/password.txt
 MOSQUITTO_USER := mosquitto
+COMPOSE_PROJECT_NAME := ti-dhome
+VM_VERSION := v1.151.0
+VMBACKUP_IMAGE := victoriametrics/vmbackup:$(VM_VERSION)
+VMRESTORE_IMAGE := victoriametrics/vmrestore:$(VM_VERSION)
+VM_DATA_VOLUME := $(COMPOSE_PROJECT_NAME)_victoria-metrics-data
 BACKUP_DIR := backup
 
-.PHONY: help setup mosquitto-dirs password pull up down start stop restart status logs ps backup restore config prune rm-volumes clean
+.PHONY: help setup mosquitto-dirs password pull up down start stop restart status logs ps backup restore vm-backup vm-restore config prune rm-volumes clean
 
 ###############################
 # SETUP
@@ -96,6 +101,28 @@ restore:
 	@tar -xzf $(FILE) -C $(WORKSPACE) mosquitto/data mosquitto/log mosquitto/config
 	@echo "Restore done."
 	@echo "Start the stack with: make up"
+
+## vm-backup: incremental snapshot backup of VictoriaMetrics to backup/vmbackup
+vm-backup:
+	@mkdir -p $(WORKSPACE)/$(BACKUP_DIR)/vmbackup
+	@docker-compose -f $(COMPOSE_FILE) --profile backup run --rm vmbackup
+	@echo "VictoriaMetrics backup done in $(BACKUP_DIR)/vmbackup/"
+
+## vm-restore: restore VictoriaMetrics data from backup/vmbackup (stops VM, wipes the volume)
+vm-restore:
+	@test -d $(WORKSPACE)/$(BACKUP_DIR)/vmbackup || (echo "No backup found in $(BACKUP_DIR)/vmbackup/" && exit 1)
+	@echo "WARNING: this erases the current VictoriaMetrics data volume ($(VM_DATA_VOLUME))."
+	@read -p "Type 'YES' to proceed: " CONFIRM && test "$$CONFIRM" = "YES" || (echo "Aborted." && exit 1)
+	@docker-compose -f $(COMPOSE_FILE) stop victoriametrics
+	@docker run --rm -v $(VM_DATA_VOLUME):/victoria-metrics-data alpine:3.20 sh -c 'rm -rf /victoria-metrics-data/*'
+	docker run --rm \
+		-v $(VM_DATA_VOLUME):/victoria-metrics-data \
+		-v $(WORKSPACE)/$(BACKUP_DIR)/vmbackup:/backup \
+		$(VMRESTORE_IMAGE) \
+		-src=fs:///backup \
+		-storageDataPath=/victoria-metrics-data
+	@docker-compose -f $(COMPOSE_FILE) start victoriametrics
+	@echo "VictoriaMetrics restore done."
 
 ###############################
 # VALIDATION & CLEANUP

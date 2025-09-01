@@ -17,14 +17,21 @@ Docker Compose stack for the three core services of the home automation project
 * Images use `linux/arm64`, compatible with the Odroid M1S
 * `make` (GNU Make) to use the provided Makefile
 
-The stack relies on Docker *named volumes* to persist data:
+## Persistence
 
-| Volume | Service |
-|---|---|
-| `mosquitto-data` | MQTT broker (retained messages, sessions) |
-| `mosquitto-log` | MQTT broker (logs) |
-| `node-red-data` | Node-RED (flows, nodes, credentials) |
-| `victoria-metrics-data` | Victoria Metrics (metrics) |
+Mosquitto state is stored in **bind mounts** under `mosquitto/`, so the files are
+directly readable/backupable on the host. Node-RED and Victoria Metrics use
+Docker *named volumes*.
+
+| Service | Storage | Location |
+|---|---|---|
+| Mosquitto (data) | bind mount | `mosquitto/data/` (`mosquitto.db`) |
+| Mosquitto (logs) | bind mount | `mosquitto/log/` |
+| Mosquitto (config) | bind mount (read-only) | `mosquitto/config/` |
+| Node-RED | named volume | `ti-dhome_node-red-data` |
+| Victoria Metrics | named volume | `ti-dhome_victoria-metrics-data` |
+
+Bind-mount directories and backups are git-ignored (see `.gitignore`).
 
 ## Quick start
 
@@ -80,8 +87,33 @@ Run `make help` to list all commands.
 | `rm-volumes` | Data removal: `down` with removal of containers, networks and named volumes |
 | `clean` | Alias of `rm-volumes` (erases all data) |
 
+### Backup & restore
+
+| Command | Description |
+|---|---|
+| `backup` | Tarball of the Mosquitto data/log/config into `backup/` |
+| `restore FILE=backup/xxx.tgz` | Restore Mosquitto state from a tarball |
+| `vm-backup` | Incremental snapshot backup of Victoria Metrics into `backup/vmbackup/` |
+| `vm-restore` | Restore Victoria Metrics from `backup/vmbackup/` (stops the VM, wipes its volume) |
+
+Mosquitto is tiny, so it is backed up with a plain `tar` of its bind mounts
+(safest to `make stop` first for a consistent `mosquitto.db`).
+
+Victoria Metrics (tens of GB) uses the official `vmbackup`/`vmrestore` tools:
+`vm-backup` calls the `/snapshot` API (zero downtime), then does an
+**incremental**+compressed copy to `backup/vmbackup/`. `vm-restore` wipes and
+refills the `victoria-metrics-data` volume from the latest backup — the stack
+must be stopped, and the command asks for confirmation. For offsite copies,
+point `-dst` at an S3/GCS bucket instead of `fs:///backup`.
+
+The one-shot `vmbackup` service mounts `vmbackup-tmp` at `/tmp`: it is dedicated
+scratch space (via the tool's `-tmpdir`) for staging part files during a backup,
+kept off the container's ephemeral overlay layer. Safe to keep; it matters most
+for large DBs and when backing up to a remote destination, where uploads are
+staged heavily.
+
 `rm-volumes` / `clean` are *destructive*: they erase metrics, flows and MQTT state.
-A Victoria Metrics backup should be taken first (see the *Maintenance* category).
+Run `backup` and `vm-backup` first.
 
 ## Services
 
