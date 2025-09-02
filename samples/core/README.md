@@ -112,6 +112,10 @@ kept off the container's ephemeral overlay layer. Safe to keep; it matters most
 for large DBs and when backing up to a remote destination, where uploads are
 staged heavily.
 
+`vmbackup` runs as root (it must read the root-owned `victoria-metrics-data`
+volume), so `vm-backup` re-owns `backup/vmbackup` back to your user afterwards
+via a throwaway container — no host `sudo` required.
+
 `rm-volumes` / `clean` are *destructive*: they erase metrics, flows and MQTT state.
 Run `backup` and `vm-backup` first.
 

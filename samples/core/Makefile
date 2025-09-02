@@ -12,6 +12,8 @@ VMBACKUP_IMAGE := victoriametrics/vmbackup:$(VM_VERSION)
 VMRESTORE_IMAGE := victoriametrics/vmrestore:$(VM_VERSION)
 VM_DATA_VOLUME := $(COMPOSE_PROJECT_NAME)_victoria-metrics-data
 BACKUP_DIR := backup
+HOST_UID := $(shell id -u)
+HOST_GID := $(shell id -g)
 
 .PHONY: help setup mosquitto-dirs password pull up down start stop restart status logs ps backup restore vm-backup vm-restore config prune rm-volumes clean
 
@@ -106,7 +108,8 @@ restore:
 vm-backup:
 	@mkdir -p $(WORKSPACE)/$(BACKUP_DIR)/vmbackup
 	@docker-compose -f $(COMPOSE_FILE) --profile backup run --rm vmbackup
-	@echo "VictoriaMetrics backup done in $(BACKUP_DIR)/vmbackup/"
+	@docker run --rm -v $(WORKSPACE)/$(BACKUP_DIR)/vmbackup:/backup alpine:3.20 chown -R $(HOST_UID):$(HOST_GID) /backup
+	@echo "VictoriaMetrics backup done in $(BACKUP_DIR)/vmbackup/ (owned by $(HOST_UID):$(HOST_GID))"
 
 ## vm-restore: restore VictoriaMetrics data from backup/vmbackup (stops VM, wipes the volume)
 vm-restore:
