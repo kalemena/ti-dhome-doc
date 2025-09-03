@@ -65,10 +65,38 @@ services:
     depends_on:
       - victoriametrics
 
+  grafana:
+    # https://github.com/grafana/grafana/releases
+    image: grafana/grafana-oss:12.4.2
+    restart: unless-stopped
+    ports:
+      - 3000:3000
+    volumes:
+      # - ./etc/grafana:/etc/grafana
+      # - ./var/lib/grafana:/var/lib/grafana
+      # - ./var/log/grafana:/var/log/grafana
+      - grafana-data:/var/lib/grafana
+      #- ./etc/grafana/provisioning/:/etc/grafana/provisioning/
+      #- ./etc/grafana/canvas/:/usr/share/grafana/public/img/bg/:ro
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-default}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-password}
+      GF_ENABLE_GZIP: true
+      GF_USERS_DEFAULT_THEME: dark
+      GF_ANALYTICS_CHECK_FOR_UPDATES: false
+      #GF_INSTALL_PLUGINS: volkovlabs-echarts-panel,lehmannch-flow-panel
+      #GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/Tidhome-Power.json
+      GF_FEATURE_TOGGLES_ENABLE: topnav,newPanelChromeUI
+    env_file:
+      - .env
+    networks:
+      - ti-dhome
+
 volumes:
   node-red-data:
   victoria-metrics-data:
   vmbackup-tmp:
+  grafana-data:
 
 networks:
   ti-dhome:
