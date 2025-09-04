@@ -127,6 +127,33 @@ vm-restore:
 	@docker-compose -f $(COMPOSE_FILE) start victoriametrics
 	@echo "VictoriaMetrics restore done."
 
+## nodered-backup: create a tarball of the Node-RED data into backup/
+nodered-backup:
+	@mkdir -p $(BACKUP_DIR)
+	@docker-compose -f $(COMPOSE_FILE) stop nodered
+	@docker run --rm \
+		-v $(COMPOSE_PROJECT_NAME)_node-red-data:/data:ro \
+		-v $(WORKSPACE)/$(BACKUP_DIR):/backup \
+		alpine:3.20 tar -czf /backup/nodered-backup-$$(date +%Y%m%d-%H%M%S).tgz -C /data .
+	@docker run --rm -v $(WORKSPACE)/$(BACKUP_DIR):/backup alpine:3.20 chown -R $(HOST_UID):$(HOST_GID) /backup
+	@docker-compose -f $(COMPOSE_FILE) start nodered
+	@echo "Node-RED backup created in $(BACKUP_DIR)/"
+
+## nodered-restore: restore Node-RED data from a tarball (run make nodered-restore FILE=backup/xxx.tgz)
+nodered-restore:
+	@test -n "$(FILE)" || (echo "Usage: make nodered-restore FILE=$(BACKUP_DIR)/nodered-backup-<timestamp>.tgz" && exit 1)
+	@test -f "$(FILE)" || (echo "File not found: $(FILE)" && exit 1)
+	@echo "WARNING: this erases the current Node-RED data volume ($(COMPOSE_PROJECT_NAME)_node-red-data)."
+	@read -p "Type 'YES' to proceed: " CONFIRM && test "$$CONFIRM" = "YES" || (echo "Aborted." && exit 1)
+	@docker-compose -f $(COMPOSE_FILE) stop nodered
+	@docker run --rm -v $(COMPOSE_PROJECT_NAME)_node-red-data:/data alpine:3.20 sh -c 'rm -rf /data/*'
+	@docker run --rm \
+		-v $(COMPOSE_PROJECT_NAME)_node-red-data:/data \
+		-v $(WORKSPACE)/$(FILE):/backup/backup.tgz:ro \
+		alpine:3.20 sh -c 'tar -xzf /backup/backup.tgz -C /data'
+	@docker-compose -f $(COMPOSE_FILE) start nodered
+	@echo "Node-RED restore done."
+
 ###############################
 # VALIDATION & CLEANUP
 ###############################
