@@ -45,7 +45,7 @@ services:
       - mqtt
 
   vmbackup:
-    # One-shot incremental backup via the snapshot API (run: make vm-backup)
+    # One-shot incremental backup via the snapshot API (run: make backup.vm)
     # https://docs.victoriametrics.com/victoriametrics/vmbackup/
     image: victoriametrics/vmbackup:v1.151.0
     restart: "no"

@@ -91,19 +91,26 @@ Run `make help` to list all commands.
 
 | Command | Description |
 |---|---|
-| `backup` | Tarball of the Mosquitto data/log/config into `backup/` |
-| `restore FILE=backup/xxx.tgz` | Restore Mosquitto state from a tarball |
-| `vm-backup` | Incremental snapshot backup of Victoria Metrics into `backup/vmbackup/` |
-| `vm-restore` | Restore Victoria Metrics from `backup/vmbackup/` (stops the VM, wipes its volume) |
-| `nodered-backup` | Tarball of the Node-RED data volume into `backup/` |
-| `nodered-restore FILE=backup/xxx.tgz` | Restore the Node-RED data volume from a tarball (stops Node-RED, wipes its volume) |
+| `backup` | Backup all services (runs `backup.mosquitto` + `backup.vm` + `backup.nodered`) |
+| `backup.mosquitto` | Tarball of the Mosquitto data/log/config into `backup/` |
+| `backup.vm` | Incremental snapshot backup of Victoria Metrics into `backup/vmbackup/` |
+| `backup.nodered` | Tarball of the Node-RED data volume into `backup/` |
+| `restore` | List the available per-service restore commands |
+| `restore.mosquitto FILE=backup/xxx.tgz` | Restore Mosquitto state from a tarball |
+| `restore.vm` | Restore Victoria Metrics from `backup/vmbackup/` (stops the VM, wipes its volume) |
+| `restore.nodered FILE=backup/xxx.tgz` | Restore the Node-RED data volume from a tarball (stops Node-RED, wipes its volume) |
+
+`backup` runs the three `backup.*` targets back to back; each stops/restarts its
+service around the copy. Restores are deliberately *not* aggregated: they are
+destructive, so each service has its own explicit `restore.*` command — run
+`make restore` to list them. Run `make backup` first, then `make restore.<svc>`.
 
 Mosquitto is tiny, so it is backed up with a plain `tar` of its bind mounts
 (safest to `make stop` first for a consistent `mosquitto.db`).
 
 Victoria Metrics (tens of GB) uses the official `vmbackup`/`vmrestore` tools:
-`vm-backup` calls the `/snapshot` API (zero downtime), then does an
-**incremental**+compressed copy to `backup/vmbackup/`. `vm-restore` wipes and
+`backup.vm` calls the `/snapshot` API (zero downtime), then does an
+**incremental**+compressed copy to `backup/vmbackup/`. `restore.vm` wipes and
 refills the `victoria-metrics-data` volume from the latest backup — the stack
 must be stopped, and the command asks for confirmation. For offsite copies,
 point `-dst` at an S3/GCS bucket instead of `fs:///backup`.
@@ -115,20 +122,20 @@ for large DBs and when backing up to a remote destination, where uploads are
 staged heavily.
 
 `vmbackup` runs as root (it must read the root-owned `victoria-metrics-data`
-volume), so `vm-backup` re-owns `backup/vmbackup` back to your user afterwards
+volume), so `backup.vm` re-owns `backup/vmbackup` back to your user afterwards
 via a throwaway container — no host `sudo` required.
 
 Node-RED volume (Node-RED flows, settings and installed node modules, typically
 a few MB) is backed up as a plain `tar` of its named volume by a one-shot
-`alpine` container: `nodered-backup` stops the container for a consistent
+`alpine` container: `backup.nodered` stops the container for a consistent
 `flows.json`, tars the volume into `backup/nodered-backup-<timestamp>.tgz`, and
-restarts it. `nodered-restore` wipes and refills the `node-red-data` volume from
+restarts it. `restore.nodered` wipes and refills the `node-red-data` volume from
 the given tarball (the stack must be stopped and the command asks for
-confirmation, like `vm-restore`). The tarballs are root-owned (alpine runs as
-root), so the backup file is re-owned to your user the same way as `vm-backup`.
+confirmation, like `restore.vm`). The tarballs are root-owned (alpine runs as
+root), so the backup file is re-owned to your user the same way as `backup.vm`.
 
 `rm-volumes` / `clean` are *destructive*: they erase metrics, flows and MQTT state.
-Run `backup`, `vm-backup` and `nodered-backup` first.
+Run `backup` (or any `backup.*` target) first.
 
 ## Services
 

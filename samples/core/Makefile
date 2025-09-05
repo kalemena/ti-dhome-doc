@@ -11,11 +11,17 @@ VM_VERSION := v1.151.0
 VMBACKUP_IMAGE := victoriametrics/vmbackup:$(VM_VERSION)
 VMRESTORE_IMAGE := victoriametrics/vmrestore:$(VM_VERSION)
 VM_DATA_VOLUME := $(COMPOSE_PROJECT_NAME)_victoria-metrics-data
+NODERED_DATA_VOLUME := $(COMPOSE_PROJECT_NAME)_node-red-data
 BACKUP_DIR := backup
+VM_BACKUP_DIR := $(BACKUP_DIR)/vmbackup
 HOST_UID := $(shell id -u)
 HOST_GID := $(shell id -g)
 
-.PHONY: help setup mosquitto-dirs password pull up down start stop restart status logs ps backup restore vm-backup vm-restore config prune rm-volumes clean
+.PHONY: help setup mosquitto-dirs password pull up down start stop restart status logs ps backup backup.mosquitto backup.vm backup.nodered restore restore.mosquitto restore.vm restore.nodered config prune rm-volumes clean
+
+DOCKER_COMPOSE := docker-compose -f $(COMPOSE_FILE)
+STOP_SVC := $(DOCKER_COMPOSE) stop
+START_SVC := $(DOCKER_COMPOSE) start
 
 ###############################
 # SETUP
@@ -89,69 +95,98 @@ ps: status
 # BACKUP
 ###############################
 
-## backup: create a tarball of the Mosquitto data/log/config into backup/
-backup:
+# require-backup-file <pattern>: fail unless FILE points to an existing backup tarball
+define require-backup-file
+  @test -n "$(FILE)" || (echo "Usage: make $@ FILE=$(1)" && exit 1)
+  @test -f "$(FILE)" || (echo "File not found: $(FILE)" && exit 1)
+endef
+
+# confirm-wipe <what>: ask for an explicit 'YES' before a destructive restore
+define confirm-wipe
+  @echo "WARNING: this erases the current data ($(1))."
+  @read -p "Type 'YES' to proceed: " CONFIRM && test "$$CONFIRM" = "YES" || (echo "Aborted." && exit 1)
+endef
+
+# reown-host <host-dir>: give the backup files back to the host user
+define reown-host
+  @docker run --rm -v $(1):/backup alpine:3.20 chown -R $(HOST_UID):$(HOST_GID) /backup
+endef
+
+# backup-volume <service> <volume> <mount> <prefix>: stop the service, tar its
+# named volume into backup/<prefix>-backup-<timestamp>.tgz, then restart it.
+define backup-volume
+  @mkdir -p $(BACKUP_DIR)
+  @$(STOP_SVC) $(1)
+  @docker run --rm -v $(2):$(3):ro -v $(WORKSPACE)/$(BACKUP_DIR):/backup alpine:3.20 tar -czf /backup/$(4)-backup-$$(date +%Y%m%d-%H%M%S).tgz -C $(3) .
+  @$(call reown-host,$(WORKSPACE)/$(BACKUP_DIR))
+  @$(START_SVC) $(1)
+endef
+
+# restore-volume <service> <volume> <mount> <pattern>: wipe a named volume and
+# refill it from FILE, stopping/restarting the service around it.
+define restore-volume
+  @$(call require-backup-file,$(4))
+  @$(call confirm-wipe,$(2))
+  @$(STOP_SVC) $(1)
+  @docker run --rm -v $(2):$(3) alpine:3.20 sh -c 'rm -rf $(3)/*'
+  @docker run --rm -v $(2):$(3) -v $(WORKSPACE)/$(FILE):/backup/backup.tgz:ro alpine:3.20 sh -c 'tar -xzf /backup/backup.tgz -C $(3)'
+  @$(START_SVC) $(1)
+endef
+
+## backup: backup all services (Mosquitto, VictoriaMetrics, Node-RED)
+backup: backup.mosquitto backup.vm backup.nodered
+
+## backup.mosquitto: create a tarball of the Mosquitto data/log/config into backup/
+backup.mosquitto:
 	@mkdir -p $(BACKUP_DIR)
 	@tar -czf $(BACKUP_DIR)/mosquitto-backup-$$(date +%Y%m%d-%H%M%S).tgz mosquitto/data mosquitto/log mosquitto/config
 	@echo "Backup created in $(BACKUP_DIR)/"
 
-## restore: restore data/log/config from a tarball (run make restore FILE=backup/xxx.tgz)
+## backup.vm: incremental snapshot backup of VictoriaMetrics into backup/vmbackup
+backup.vm:
+	@mkdir -p $(WORKSPACE)/$(VM_BACKUP_DIR)
+	@$(DOCKER_COMPOSE) --profile backup run --rm vmbackup
+	@$(call reown-host,$(WORKSPACE)/$(VM_BACKUP_DIR))
+	@echo "VictoriaMetrics backup done in $(VM_BACKUP_DIR)/ (owned by $(HOST_UID):$(HOST_GID))"
+
+## backup.nodered: create a tarball of the Node-RED data volume into backup/
+backup.nodered:
+	@$(call backup-volume,nodered,$(NODERED_DATA_VOLUME),/data,nodered)
+	@echo "Node-RED backup created in $(BACKUP_DIR)/"
+
+## restore: list the available per-service restore commands
 restore:
-	@test -n "$(FILE)" || (echo "Usage: make restore FILE=$(BACKUP_DIR)/mosquitto-backup-<timestamp>.tgz" && exit 1)
-	@test -f "$(FILE)" || (echo "File not found: $(FILE)" && exit 1)
-	@docker-compose -f $(COMPOSE_FILE) stop mqtt
+	@echo "Choose the service to restore:"
+	@echo "  make restore.mosquitto FILE=$(BACKUP_DIR)/mosquitto-backup-<timestamp>.tgz"
+	@echo "  make restore.vm"
+	@echo "  make restore.nodered FILE=$(BACKUP_DIR)/nodered-backup-<timestamp>.tgz"
+
+## restore.mosquitto: restore Mosquitto data/log/config from a tarball
+restore.mosquitto:
+	@$(call require-backup-file,$(BACKUP_DIR)/mosquitto-backup-<timestamp>.tgz)
+	@$(STOP_SVC) mqtt
 	@tar -xzf $(FILE) -C $(WORKSPACE) mosquitto/data mosquitto/log mosquitto/config
 	@echo "Restore done."
 	@echo "Start the stack with: make up"
 
-## vm-backup: incremental snapshot backup of VictoriaMetrics to backup/vmbackup
-vm-backup:
-	@mkdir -p $(WORKSPACE)/$(BACKUP_DIR)/vmbackup
-	@docker-compose -f $(COMPOSE_FILE) --profile backup run --rm vmbackup
-	@docker run --rm -v $(WORKSPACE)/$(BACKUP_DIR)/vmbackup:/backup alpine:3.20 chown -R $(HOST_UID):$(HOST_GID) /backup
-	@echo "VictoriaMetrics backup done in $(BACKUP_DIR)/vmbackup/ (owned by $(HOST_UID):$(HOST_GID))"
-
-## vm-restore: restore VictoriaMetrics data from backup/vmbackup (stops VM, wipes the volume)
-vm-restore:
-	@test -d $(WORKSPACE)/$(BACKUP_DIR)/vmbackup || (echo "No backup found in $(BACKUP_DIR)/vmbackup/" && exit 1)
-	@echo "WARNING: this erases the current VictoriaMetrics data volume ($(VM_DATA_VOLUME))."
-	@read -p "Type 'YES' to proceed: " CONFIRM && test "$$CONFIRM" = "YES" || (echo "Aborted." && exit 1)
-	@docker-compose -f $(COMPOSE_FILE) stop victoriametrics
+## restore.vm: restore VictoriaMetrics data from backup/vmbackup (stops VM, wipes the volume)
+restore.vm:
+	@test -d $(WORKSPACE)/$(VM_BACKUP_DIR) || (echo "No backup found in $(VM_BACKUP_DIR)/" && exit 1)
+	@$(call confirm-wipe,$(VM_DATA_VOLUME))
+	@$(STOP_SVC) victoriametrics
 	@docker run --rm -v $(VM_DATA_VOLUME):/victoria-metrics-data alpine:3.20 sh -c 'rm -rf /victoria-metrics-data/*'
-	docker run --rm \
+	@docker run --rm \
 		-v $(VM_DATA_VOLUME):/victoria-metrics-data \
-		-v $(WORKSPACE)/$(BACKUP_DIR)/vmbackup:/backup \
+		-v $(WORKSPACE)/$(VM_BACKUP_DIR):/backup \
 		$(VMRESTORE_IMAGE) \
 		-src=fs:///backup \
 		-storageDataPath=/victoria-metrics-data
-	@docker-compose -f $(COMPOSE_FILE) start victoriametrics
+	@$(START_SVC) victoriametrics
 	@echo "VictoriaMetrics restore done."
 
-## nodered-backup: create a tarball of the Node-RED data into backup/
-nodered-backup:
-	@mkdir -p $(BACKUP_DIR)
-	@docker-compose -f $(COMPOSE_FILE) stop nodered
-	@docker run --rm \
-		-v $(COMPOSE_PROJECT_NAME)_node-red-data:/data:ro \
-		-v $(WORKSPACE)/$(BACKUP_DIR):/backup \
-		alpine:3.20 tar -czf /backup/nodered-backup-$$(date +%Y%m%d-%H%M%S).tgz -C /data .
-	@docker run --rm -v $(WORKSPACE)/$(BACKUP_DIR):/backup alpine:3.20 chown -R $(HOST_UID):$(HOST_GID) /backup
-	@docker-compose -f $(COMPOSE_FILE) start nodered
-	@echo "Node-RED backup created in $(BACKUP_DIR)/"
-
-## nodered-restore: restore Node-RED data from a tarball (run make nodered-restore FILE=backup/xxx.tgz)
-nodered-restore:
-	@test -n "$(FILE)" || (echo "Usage: make nodered-restore FILE=$(BACKUP_DIR)/nodered-backup-<timestamp>.tgz" && exit 1)
-	@test -f "$(FILE)" || (echo "File not found: $(FILE)" && exit 1)
-	@echo "WARNING: this erases the current Node-RED data volume ($(COMPOSE_PROJECT_NAME)_node-red-data)."
-	@read -p "Type 'YES' to proceed: " CONFIRM && test "$$CONFIRM" = "YES" || (echo "Aborted." && exit 1)
-	@docker-compose -f $(COMPOSE_FILE) stop nodered
-	@docker run --rm -v $(COMPOSE_PROJECT_NAME)_node-red-data:/data alpine:3.20 sh -c 'rm -rf /data/*'
-	@docker run --rm \
-		-v $(COMPOSE_PROJECT_NAME)_node-red-data:/data \
-		-v $(WORKSPACE)/$(FILE):/backup/backup.tgz:ro \
-		alpine:3.20 sh -c 'tar -xzf /backup/backup.tgz -C /data'
-	@docker-compose -f $(COMPOSE_FILE) start nodered
+## restore.nodered: restore the Node-RED data volume from a tarball (stops Node-RED, wipes its volume)
+restore.nodered:
+	@$(call restore-volume,nodered,$(NODERED_DATA_VOLUME),/data,$(BACKUP_DIR)/nodered-backup-<timestamp>.tgz)
 	@echo "Node-RED restore done."
 
 ###############################
