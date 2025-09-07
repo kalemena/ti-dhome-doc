@@ -15,7 +15,7 @@ Below is the list of core services to deploy, with the configuration used in thi
 * *Victoria Metrics*: time-series database storing all metrics (Prometheus compatible)
 
 A ready-to-deploy stack (Docker Compose + Makefile wrapping setup and management) is provided
-in the `samples/core` folder of this repository.
+in the `samples` folder of this repository.
 
 == Architecture
 
@@ -40,7 +40,7 @@ each service and makes backup, restore and upgrade straightforward: upgrading an
 recreating a container never destroys the data.
 
 The stack management is delegated to a *Makefile* (`make up`, `make down`, `make setup`,
-`make logs`, ...): see the `samples/core` README for the full command list.
+`make logs`, ...): see the `samples` README for the full command list.
 
 == MQTT broker (Mosquitto)
 
