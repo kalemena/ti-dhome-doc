@@ -19,15 +19,17 @@ Docker Compose stack for the three core services of the home automation project
 
 ## Persistence
 
-Mosquitto state is stored in **bind mounts** under `mosquitto/`, so the files are
-directly readable/backupable on the host. Node-RED and Victoria Metrics use
-Docker *named volumes*.
+Mosquitto state is stored in **bind mounts**: the committed configuration under
+`etc/mosquitto/` (read-only) and the runtime state under `workspace/mosquitto/`,
+so the files are directly readable/backupable on the host. Node-RED and Victoria
+Metrics use Docker *named volumes*.
 
 | Service | Storage | Location |
 |---|---|---|
-| Mosquitto (data) | bind mount | `mosquitto/data/` (`mosquitto.db`) |
-| Mosquitto (logs) | bind mount | `mosquitto/log/` |
-| Mosquitto (config) | bind mount (read-only) | `mosquitto/config/` |
+| Mosquitto (config) | bind mount (read-only) | `etc/mosquitto/config/` (`mosquitto.conf`) |
+| Mosquitto (data) | bind mount | `workspace/mosquitto/data/` (`mosquitto.db`) |
+| Mosquitto (logs) | bind mount | `workspace/mosquitto/log/` |
+| Mosquitto (password) | bind mount | `workspace/mosquitto/config/` (`password.txt`) |
 | Node-RED | named volume | `ti-dhome_node-red-data` |
 | Victoria Metrics | named volume | `ti-dhome_victoria-metrics-data` |
 
@@ -46,12 +48,13 @@ $ make status   # show containers status
 | File | Purpose |
 |---|---|
 | `docker-compose.yml` | Services, ports, volumes, network |
-| `mosquitto/config/mosquitto.conf` | Mosquitto configuration (read-only mount) |
-| `mosquitto/config/password.txt` | Mosquitto credentials, created by `make password` |
+| `etc/mosquitto/config/mosquitto.conf` | Mosquitto configuration (read-only mount) |
+| `workspace/mosquitto/config/password.txt` | Mosquitto credentials, created by `make password` |
 
-`mosquitto/config/password.txt` is created by `make password` and is expected to
-contain a user named `mosquitto` (override with `make password MOSQUITTO_USER=foo`).
-The file is sensitive: it should never be committed to version control.
+`workspace/mosquitto/config/password.txt` is created by `make password` and is
+expected to contain a user named `mosquitto` (override with
+`make password MOSQUITTO_USER=foo`). The file is sensitive: it should never be
+committed to version control.
 
 ## Makefile commands
 

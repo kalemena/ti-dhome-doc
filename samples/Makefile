@@ -4,7 +4,7 @@ SHELL := /bin/bash
 
 COMPOSE_FILE := docker-compose.yml
 MOSQUITTO_IMAGE := eclipse-mosquitto:2.1.2-alpine
-PASSWORD_FILE := mosquitto/config/password.txt
+PASSWORD_FILE := workspace/mosquitto/config/password.txt
 MOSQUITTO_USER := mosquitto
 COMPOSE_PROJECT_NAME := ti-dhome
 VM_VERSION := v1.151.0
@@ -36,19 +36,19 @@ setup: mosquitto-dirs password pull
 
 ## mosquitto-dirs: create the Mosquitto data/log/config folders
 mosquitto-dirs:
-	@mkdir -p mosquitto/data mosquitto/log mosquitto/config
+	@mkdir -p workspace/mosquitto/data workspace/mosquitto/log workspace/mosquitto/config
 	@echo "Created Mosquitto folders:"
-	@echo "  - mosquitto/data"
-	@echo "  - mosquitto/log"
-	@echo "  - mosquitto/config"
+	@echo "  - workspace/mosquitto/data"
+	@echo "  - workspace/mosquitto/log"
+	@echo "  - workspace/mosquitto/config"
 
 ## password: create the Mosquitto password file (asks for a password)
 password: mosquitto-dirs
 	@echo "Creating Mosquitto password file for user '$(MOSQUITTO_USER)' ..."
 	docker run --rm -it \
-		-v $(WORKSPACE)/mosquitto/data:/mosquitto/data \
-		-v $(WORKSPACE)/mosquitto/log:/mosquitto/log \
-		-v $(WORKSPACE)/mosquitto/config:/mosquitto/config \
+		-v $(WORKSPACE)/workspace/mosquitto/data:/mosquitto/data \
+		-v $(WORKSPACE)/workspace/mosquitto/log:/mosquitto/log \
+		-v $(WORKSPACE)/workspace/mosquitto/config:/mosquitto/config \
 		$(MOSQUITTO_IMAGE) \
 		mosquitto_passwd -c /mosquitto/config/password.txt $(MOSQUITTO_USER)
 
@@ -139,7 +139,7 @@ backup: backup.mosquitto backup.vm backup.nodered
 ## backup.mosquitto: create a tarball of the Mosquitto data/log/config into backup/
 backup.mosquitto:
 	@mkdir -p $(BACKUP_DIR)
-	@tar -czf $(BACKUP_DIR)/mosquitto-backup-$$(date +%Y%m%d-%H%M%S).tgz mosquitto/data mosquitto/log mosquitto/config
+	@tar -czf $(BACKUP_DIR)/mosquitto-backup-$$(date +%Y%m%d-%H%M%S).tgz workspace/mosquitto/data workspace/mosquitto/log workspace/mosquitto/config
 	@echo "Backup created in $(BACKUP_DIR)/"
 
 ## backup.vm: incremental snapshot backup of VictoriaMetrics into backup/vmbackup
@@ -165,7 +165,7 @@ restore:
 restore.mosquitto:
 	@$(call require-backup-file,$(BACKUP_DIR)/mosquitto-backup-<timestamp>.tgz)
 	@$(STOP_SVC) mqtt
-	@tar -xzf $(FILE) -C $(WORKSPACE) mosquitto/data mosquitto/log mosquitto/config
+	@tar -xzf $(FILE) -C $(WORKSPACE) workspace/mosquitto/data workspace/mosquitto/log workspace/mosquitto/config
 	@echo "Restore done."
 	@echo "Start the stack with: make up"
 
