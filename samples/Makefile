@@ -5,6 +5,11 @@ SHELL := /bin/bash
 COMPOSE_FILE := docker-compose.yml
 MOSQUITTO_IMAGE := eclipse-mosquitto:2.1.2-alpine
 PASSWORD_FILE := workspace/mosquitto/config/password.txt
+CERT_DIR := $(PWD)/workspace/mosquitto/config/certs
+CERT_DAYS := 3650
+CERT_CA_SUBJECT := /CN=Ti-DHome MQTT CA
+CERT_SERVER_SUBJECT := /CN=mqtt
+CERT_SERVER_SAN := DNS:mqtt,DNS:localhost,IP:127.0.0.1
 MOSQUITTO_USER := mosquitto
 COMPOSE_PROJECT_NAME := ti-dhome
 VM_VERSION := v1.151.0
@@ -17,7 +22,7 @@ VM_BACKUP_DIR := $(BACKUP_DIR)/vmbackup
 HOST_UID := $(shell id -u)
 HOST_GID := $(shell id -g)
 
-.PHONY: help setup mosquitto-dirs password pull up down start stop restart status logs ps backup backup.mosquitto backup.vm backup.nodered restore restore.mosquitto restore.vm restore.nodered config prune rm-volumes clean
+.PHONY: help setup certs mosquitto-dirs password pull up down start stop restart status logs ps backup backup.mosquitto backup.vm backup.nodered restore restore.mosquitto restore.vm restore.nodered config prune rm-volumes clean
 
 DOCKER_COMPOSE := docker-compose -f $(COMPOSE_FILE)
 STOP_SVC := $(DOCKER_COMPOSE) stop
@@ -31,8 +36,8 @@ START_SVC := $(DOCKER_COMPOSE) start
 help:
 	@grep -E '^## ' $(THIS_FILE) | sed 's/^## //' | column -t -s ':'
 
-## setup: setup the stack (create folders, Mosquitto password, pull images)
-setup: mosquitto-dirs password pull
+## setup: setup the stack (create folders, Mosquitto password, TLS certificates, pull images)
+setup: mosquitto-dirs password certs pull
 
 ## mosquitto-dirs: create the Mosquitto data/log/config folders
 mosquitto-dirs:
@@ -52,6 +57,23 @@ password: mosquitto-dirs
 		$(MOSQUITTO_IMAGE) \
 		mosquitto_passwd -c /mosquitto/config/password.txt $(MOSQUITTO_USER)
 
+## certs: generate the self-signed CA and server certificate for the MQTT TLS listener (idempotent, workspace is git-ignored)
+certs: mosquitto-dirs
+	@mkdir -p $(CERT_DIR)
+	@if [ -f $(CERT_DIR)/server.crt ]; then \
+		echo "Certificates already exist in $(CERT_DIR) (delete them to regenerate)."; \
+	else \
+		echo "Generating self-signed CA and server certificate in $(CERT_DIR) ..."; \
+		openssl genrsa -out $(CERT_DIR)/ca.key 3072 2>/dev/null && \
+		openssl req -x509 -new -key $(CERT_DIR)/ca.key -days $(CERT_DAYS) -subj "$(CERT_CA_SUBJECT)" -out $(CERT_DIR)/ca.crt && \
+		openssl genrsa -out $(CERT_DIR)/server.key 2048 2>/dev/null && \
+		openssl req -new -key $(CERT_DIR)/server.key -subj "$(CERT_SERVER_SUBJECT)" -addext "subjectAltName=$(CERT_SERVER_SAN)" -out $(CERT_DIR)/server.csr && \
+		openssl x509 -req -in $(CERT_DIR)/server.csr -CA $(CERT_DIR)/ca.crt -CAkey $(CERT_DIR)/ca.key -CAcreateserial -days $(CERT_DAYS) -copy_extensions copy -out $(CERT_DIR)/server.crt && \
+		rm -f $(CERT_DIR)/server.csr $(CERT_DIR)/ca.srl && \
+		chmod 644 $(CERT_DIR)/ca.crt && \
+		echo "Done: ca.crt, server.crt and server.key in $(CERT_DIR)"; \
+	fi
+
 ## pull: pull the stack images
 pull:
 	docker-compose -f $(COMPOSE_FILE) pull
@@ -61,7 +83,7 @@ pull:
 ###############################
 
 ## up: create and start the stack in the background
-up:
+up: certs
 	docker-compose -f $(COMPOSE_FILE) up -d
 
 ## down: stop and remove the stack containers

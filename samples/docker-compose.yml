@@ -6,12 +6,14 @@ services:
     restart: unless-stopped
     ports:
       - "1883:1883"
+      - "8883:8883"
       - "9001:9001"
     volumes:
       - ./workspace/mosquitto/data:/mosquitto/data
       - ./workspace/mosquitto/log:/mosquitto/log
       - ./etc/mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - ./workspace/mosquitto/config/password.txt:/mosquitto/config/password.txt
+      - ./workspace/mosquitto/config/certs:/mosquitto/config/certs:ro
     networks:
       - ti-dhome
 
@@ -24,6 +26,7 @@ services:
       - "1880:1880"
     volumes:
       - node-red-data:/data
+      - ./workspace/mosquitto/config/certs:/certs:ro
     networks:
       - ti-dhome
     depends_on:

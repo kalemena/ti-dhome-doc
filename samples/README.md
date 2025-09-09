@@ -30,6 +30,7 @@ Metrics use Docker *named volumes*.
 | Mosquitto (data) | bind mount | `workspace/mosquitto/data/` (`mosquitto.db`) |
 | Mosquitto (logs) | bind mount | `workspace/mosquitto/log/` |
 | Mosquitto (password) | bind mount | `workspace/mosquitto/config/` (`password.txt`) |
+| Mosquitto (TLS certificates) | bind mount | `workspace/mosquitto/config/certs/` (created by `make certs`) |
 | Node-RED | named volume | `ti-dhome_node-red-data` |
 | Victoria Metrics | named volume | `ti-dhome_victoria-metrics-data` |
 
@@ -50,6 +51,7 @@ $ make status   # show containers status
 | `docker-compose.yml` | Services, ports, volumes, network |
 | `etc/mosquitto/config/mosquitto.conf` | Mosquitto configuration (read-only mount) |
 | `workspace/mosquitto/config/password.txt` | Mosquitto credentials, created by `make password` |
+| `workspace/mosquitto/config/certs/` | TLS certificates for the `8883` listener, created by `make certs` |
 
 `workspace/mosquitto/config/password.txt` is created by `make password` and is
 expected to contain a user named `mosquitto` (override with
@@ -64,9 +66,10 @@ Run `make help` to list all commands.
 
 | Command | Description |
 |---|---|
-| `setup` | Full setup: create folders, Mosquitto password, pull images |
+| `setup` | Full setup: create folders, Mosquitto password, TLS certificates, pull images |
 | `mosquitto-dirs` | Create the Mosquitto `data`/`log`/`config` folders |
 | `password` | Create the Mosquitto password file (interactive) |
+| `certs` | Generate a self-signed CA and server certificate for the MQTT TLS listener (idempotent) |
 | `pull` | Pull the image versions pinned in `docker-compose.yml` |
 
 ### Lifecycle
@@ -147,6 +150,7 @@ Run `backup` (or any `backup.*` target) first.
 | Service | Address | Purpose |
 |---|---|---|
 | MQTT | `localhost:1883` | MQTT 3.1.1 / 5 clients |
+| MQTT over TLS | `localhost:8883` | MQTT with TLS (`mqtts://`), see Security |
 | MQTT over WebSockets | `localhost:9001` | Browser / dashboard clients |
 | Node-RED | `http://localhost:1880` | Editor and HTTP endpoints |
 | Victoria Metrics | `http://localhost:8428` | VMUI, write and query API |
@@ -169,7 +173,14 @@ external devices and dashboards can connect.
 ### Security
 
 * **MQTT** has anonymous access disabled and uses the `mosquitto_passwd`
-  password file; both the plain and WebSocket listeners require credentials.
+  password file; the plain, WebSocket and TLS listeners all require credentials.
+* **MQTT over TLS** is available on port `8883`. `make certs` (run automatically
+  by `setup`/`up`) generates a self-signed CA plus a server certificate — valid
+  for `mqtt` (service name) and `localhost` — in `workspace/mosquitto/config/certs/`.
+  The certs are git-ignored workspace state: treat the generated keys as
+  development-only material and replace them with properly managed certificates
+  for anything exposed off the trusted network. Client certificates are not
+  required, only the server certificate is verified.
 * Only the ports listed above are published to the host; nothing binds all
   services to a public address by default.
 * Node-RED and Victoria Metrics come without built-in authentication: keep them
@@ -179,8 +190,17 @@ external devices and dashboards can connect.
 ## Node-RED flows
 
 A sample routing flow subscribes to `teleinfo/#`, `zigbee/#` and `opendtu/#` and
-forwards the measurements to Victoria Metrics. Import any flow from the Node-RED
-editor UI once the stack is running.
+forwards the measurements to Victoria Metrics.
+
+`etc/nodered/flows/mosquitto-tls.json` is a first flow connecting to Mosquitto
+over TLS (`mqtts://mqtt:8883`): it listens on `test/#` and publishes a timestamp
+every 10s on `test/from-nodered`, so the round trip is visible in the debug
+sidebar. The broker CA (`ca.crt`) is mounted read-only into the Node-RED
+container at `/certs/`; before deploying, open the broker node and fill in the
+Mosquitto password (user `mosquitto`) on the Security tab.
+
+Import any flow from the Node-RED editor UI once the stack is running
+(`Menu ▸ Import`, then paste the JSON, or drag the file onto the editor).
 
 ## Upgrade images
 
