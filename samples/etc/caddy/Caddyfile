@@ -1,0 +1,30 @@
+# Caddy reverse proxy: TLS termination in front of Node-RED.
+#
+# CADDY_HOSTNAME is injected by Caddy from the container environment
+# (workspace/nodered.env, managed by `make env-secret`), default ti-dhome.lan.
+#
+# TLS
+#   `tls internal` uses Caddy's internal CA (self-signed, no public DNS).
+#   The CA file is available inside the container at
+#   /data/caddy/pki/authorities/local/root.crt — install it on your devices,
+#   or add `ti-dhome.lan` to their /etc/hosts and accept the warning once.
+#   With a public domain: delete the `tls internal` line, set DNS to this host
+#   and Caddy obtains + auto-renews Let's Encrypt certificates.
+#
+# Optional Basic auth (second line of defense) — uncomment, then generate a
+# hash with:  docker run --rm caddy:2.11.4 caddy hash-password --plaintext '<password>'
+#   basic_auth {
+#       admin $2a$14$...
+#   }
+
+{$CADDY_HOSTNAME} {
+    # Self-signed certificate from Caddy's internal CA (default for LAN).
+    tls internal
+
+    encode zstd gzip
+
+    # Node-RED stays on the internal `ti-dhome` network (port 1880 is not
+    # published): Caddy is the only entry point. Editor access is additionally
+    # protected by Node-RED's own adminAuth (see etc/nodered/settings.js).
+    reverse_proxy nodered:1880
+}

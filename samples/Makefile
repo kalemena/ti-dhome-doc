@@ -12,6 +12,10 @@ CERT_SERVER_SUBJECT := /CN=mqtt
 CERT_SERVER_SAN := DNS:mqtt,DNS:localhost,IP:127.0.0.1
 MOSQUITTO_USER := mosquitto
 COMPOSE_PROJECT_NAME := ti-dhome
+NODERED_IMAGE := nodered/node-red:5.0.7
+NODERED_ENV_FILE := workspace/nodered.env
+NODERED_ADMIN_USER := admin
+CADDY_HOSTNAME := ti-dhome.lan
 VM_VERSION := v1.151.0
 VMBACKUP_IMAGE := victoriametrics/vmbackup:$(VM_VERSION)
 VMRESTORE_IMAGE := victoriametrics/vmrestore:$(VM_VERSION)
@@ -22,7 +26,7 @@ VM_BACKUP_DIR := $(BACKUP_DIR)/vmbackup
 HOST_UID := $(shell id -u)
 HOST_GID := $(shell id -g)
 
-.PHONY: help setup certs mosquitto-dirs password pull up down start stop restart status logs ps backup backup.mosquitto backup.vm backup.nodered restore restore.mosquitto restore.vm restore.nodered config prune rm-volumes clean
+.PHONY: help setup certs mosquitto-dirs password env-secret password.nodered pull up down start stop restart status logs ps backup backup.mosquitto backup.vm backup.nodered restore restore.mosquitto restore.vm restore.nodered config prune rm-volumes clean
 
 DOCKER_COMPOSE := docker-compose -f $(COMPOSE_FILE)
 STOP_SVC := $(DOCKER_COMPOSE) stop
@@ -36,8 +40,8 @@ START_SVC := $(DOCKER_COMPOSE) start
 help:
 	@grep -E '^## ' $(THIS_FILE) | sed 's/^## //' | column -t -s ':'
 
-## setup: setup the stack (create folders, Mosquitto password, TLS certificates, pull images)
-setup: mosquitto-dirs password certs pull
+## setup: full setup (folders, secrets, passwords, TLS certificates, pull images)
+setup: mosquitto-dirs env-secret pull password password.nodered certs
 
 ## mosquitto-dirs: create the Mosquitto data/log/config folders
 mosquitto-dirs:
@@ -56,6 +60,36 @@ password: mosquitto-dirs
 		-v $(WORKSPACE)/workspace/mosquitto/config:/mosquitto/config \
 		$(MOSQUITTO_IMAGE) \
 		mosquitto_passwd -c /mosquitto/config/password.txt $(MOSQUITTO_USER)
+
+## env-secret: create workspace/nodered.env with a Node-RED credential secret and Caddy defaults (idempotent)
+##   consumed by compose via env_file. Generated, git-ignored workspace state.
+env-secret:
+	@mkdir -p workspace
+	@if [ ! -f $(NODERED_ENV_FILE) ]; then \
+		echo "# Runtime secrets for Node-RED and Caddy (generated, do not commit)" > $(NODERED_ENV_FILE); \
+		echo "NODE_RED_CREDENTIAL_SECRET=$$(openssl rand -hex 32)" >> $(NODERED_ENV_FILE); \
+		echo "NODE_RED_ADMIN_HASH=''" >> $(NODERED_ENV_FILE); \
+		echo "CADDY_HOSTNAME='$(CADDY_HOSTNAME)'" >> $(NODERED_ENV_FILE); \
+		echo "Created $(NODERED_ENV_FILE)"; \
+		echo "Next: make password.nodered"; \
+	else \
+		echo "$(NODERED_ENV_FILE) already exists (delete it to regenerate)."; \
+	fi
+
+## password.nodered: set the Node-RED admin password (bcrypt hash stored in workspace/nodered.env)
+password.nodered: env-secret
+	@read -s -p "Node-RED admin password: " PASS1; echo; \
+	 read -s -p "Confirm password: " PASS2; echo; \
+	 if test "$$PASS1" != "$$PASS2" || test -z "$$PASS1"; then \
+	   echo "Aborted: passwords do not match or are empty."; exit 1; \
+	 fi; \
+	 HASH=$$(echo "$$PASS1" | docker run --rm -i --entrypoint node $(NODERED_IMAGE) -e "const b=require('bcryptjs');let s='';process.stdin.on('data',c=>s+=c).on('end',()=>process.stdout.write(b.hashSync(s.trim(),10)))"); \
+	 if test -z "$$HASH"; then \
+	   echo "Failed to generate the password hash (run 'make pull' first)."; exit 1; \
+	 fi; \
+	 TMP=$$(mktemp); \
+	 awk -v k="NODE_RED_ADMIN_HASH" -v v="'$$HASH'" 'BEGIN{done=0} $$0 ~ "^"k"=" {print k"="v; done=1; next} {print} END{if(!done) print k"="v}' $(NODERED_ENV_FILE) > "$$TMP" && mv "$$TMP" $(NODERED_ENV_FILE); \
+	 echo "Node-RED admin password updated (user: $(NODERED_ADMIN_USER))."
 
 ## certs: generate the self-signed CA and server certificate for the MQTT TLS listener (idempotent, workspace is git-ignored)
 certs: mosquitto-dirs
@@ -83,7 +117,8 @@ pull:
 ###############################
 
 ## up: create and start the stack in the background
-up: certs
+up: env-secret certs
+	@grep -Eq "^NODE_RED_ADMIN_HASH='[^']" $(NODERED_ENV_FILE) || echo "WARNING: Node-RED admin password not set yet (run: make password.nodered)"
 	docker-compose -f $(COMPOSE_FILE) up -d
 
 ## down: stop and remove the stack containers
@@ -215,8 +250,8 @@ restore.nodered:
 # VALIDATION & CLEANUP
 ###############################
 
-## config: validate the docker-compose file
-config:
+## config: validate the docker-compose file (needs workspace/nodered.env)
+config: env-secret
 	docker-compose -f $(COMPOSE_FILE) config
 
 ## prune: stop and remove containers, networks and orphan containers (data kept)

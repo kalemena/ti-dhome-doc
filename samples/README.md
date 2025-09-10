@@ -8,7 +8,8 @@ Docker Compose stack for the three core services of the home automation project
 | Service | Image | Version |
 |---|---|---|
 | MQTT broker | `eclipse-mosquitto` | 2.1.2 |
-| Node-RED | `nodered/node-red` | 5.0.6 |
+| Node-RED | `nodered/node-red` | 5.0.7 |
+| Caddy | `caddy` | 2.11.4 |
 | Victoria Metrics | `victoriametrics/victoria-metrics` | v1.151.0 |
 
 ## Prerequisites
@@ -21,8 +22,8 @@ Docker Compose stack for the three core services of the home automation project
 
 Mosquitto state is stored in **bind mounts**: the committed configuration under
 `etc/mosquitto/` (read-only) and the runtime state under `workspace/mosquitto/`,
-so the files are directly readable/backupable on the host. Node-RED and Victoria
-Metrics use Docker *named volumes*.
+so the files are directly readable/backupable on the host. Node-RED, Caddy and
+Victoria Metrics use Docker *named volumes*.
 
 | Service | Storage | Location |
 |---|---|---|
@@ -32,6 +33,7 @@ Metrics use Docker *named volumes*.
 | Mosquitto (password) | bind mount | `workspace/mosquitto/config/` (`password.txt`) |
 | Mosquitto (TLS certificates) | bind mount | `workspace/mosquitto/config/certs/` (created by `make certs`) |
 | Node-RED | named volume | `ti-dhome_node-red-data` |
+| Caddy (TLS state + config) | named volumes | `ti-dhome_caddy-data`, `ti-dhome_caddy-config` |
 | Victoria Metrics | named volume | `ti-dhome_victoria-metrics-data` |
 
 Bind-mount directories and backups are git-ignored (see `.gitignore`).
@@ -39,10 +41,13 @@ Bind-mount directories and backups are git-ignored (see `.gitignore`).
 ## Quick start
 
 ```bash
-$ make setup    # create folders, Mosquitto password, pull images
+$ make setup    # create folders, secrets, Mosquitto + Node-RED passwords, pull images
 $ make up       # start the stack detached
 $ make status   # show containers status
 ```
+
+`make setup` prompts for passwords interactively: the Mosquitto broker user and
+the Node-RED admin user. Secrets live in git-ignored `workspace/` files.
 
 ## Configuration
 
@@ -52,11 +57,19 @@ $ make status   # show containers status
 | `etc/mosquitto/config/mosquitto.conf` | Mosquitto configuration (read-only mount) |
 | `workspace/mosquitto/config/password.txt` | Mosquitto credentials, created by `make password` |
 | `workspace/mosquitto/config/certs/` | TLS certificates for the `8883` listener, created by `make certs` |
+| `etc/caddy/Caddyfile` | Caddy reverse proxy: TLS termination in front of Node-RED |
+| `etc/nodered/settings.js` | Node-RED security settings (`adminAuth`, `httpNodeAuth`, `credentialSecret`) |
+| `workspace/nodered.env` | Node-RED/Caddy runtime secrets, created by `make env-secret` |
 
 `workspace/mosquitto/config/password.txt` is created by `make password` and is
 expected to contain a user named `mosquitto` (override with
 `make password MOSQUITTO_USER=foo`). The file is sensitive: it should never be
 committed to version control.
+
+`workspace/nodered.env` is created by `make env-secret` (non-interactive) and
+holds `NODE_RED_CREDENTIAL_SECRET` (used to encrypt `flows_cred.json`),
+`NODE_RED_ADMIN_HASH` (set by `make password.nodered`) and `CADDY_HOSTNAME`.
+It is equally sensitive and git-ignored.
 
 ## Makefile commands
 
@@ -66,9 +79,11 @@ Run `make help` to list all commands.
 
 | Command | Description |
 |---|---|
-| `setup` | Full setup: create folders, Mosquitto password, TLS certificates, pull images |
+| `setup` | Full setup: create folders, secrets, Mosquitto + Node-RED passwords, TLS certificates, pull images |
 | `mosquitto-dirs` | Create the Mosquitto `data`/`log`/`config` folders |
 | `password` | Create the Mosquitto password file (interactive) |
+| `env-secret` | Create `workspace/nodered.env` with a fresh Node-RED credential secret and Caddy default hostname (non-interactive, idempotent) |
+| `password.nodered` | Set the Node-RED admin password (bcrypt hash into `workspace/nodered.env`) |
 | `certs` | Generate a self-signed CA and server certificate for the MQTT TLS listener (idempotent) |
 | `pull` | Pull the image versions pinned in `docker-compose.yml` |
 
@@ -88,7 +103,7 @@ Run `make help` to list all commands.
 
 | Command | Description |
 |---|---|
-| `config` | Validate `docker-compose.yml` |
+| `config` | Validate `docker-compose.yml` (also creates `workspace/nodered.env` if missing) |
 | `prune` | `down`, plus removal of orphan containers (volumes and data kept) |
 | `rm-volumes` | Data removal: `down` with removal of containers, networks and named volumes |
 | `clean` | Alias of `rm-volumes` (erases all data) |
@@ -152,8 +167,17 @@ Run `backup` (or any `backup.*` target) first.
 | MQTT | `localhost:1883` | MQTT 3.1.1 / 5 clients |
 | MQTT over TLS | `localhost:8883` | MQTT with TLS (`mqtts://`), see Security |
 | MQTT over WebSockets | `localhost:9001` | Browser / dashboard clients |
-| Node-RED | `http://localhost:1880` | Editor and HTTP endpoints |
+| Caddy | `localhost:443` (HTTPS) | Reverse proxy, TLS termination |
+| Node-RED | `https://ti-dhome.lan` (via Caddy) | Editor and HTTP endpoints |
 | Victoria Metrics | `http://localhost:8428` | VMUI, write and query API |
+
+Node-RED is only served through Caddy: from a browser, resolve `ti-dhome.lan`
+to the stack host (`/etc/hosts` or DNS) and either accept the self-signed
+certificate once or install Caddy's internal CA from the container:
+
+```bash
+$ docker exec ti-dhome-caddy-1 cat /data/caddy/pki/authorities/local/root.crt
+```
 
 ### Networking
 
@@ -167,8 +191,10 @@ It prefixes all auto-generated resource names:
 | Network | `ti-dhome` (explicit `name:`) |
 
 Each service joins the `ti-dhome` network and can reach the others by service
-name (`mqtt`, `nodered`, `victoriametrics`). Ports are published to the host so
-external devices and dashboards can connect.
+name (`mqtt`, `caddy`, `nodered`, `victoriametrics`). MQTT, Victoria Metrics and
+Grafana ports are published to the host so external devices and dashboards can
+connect. Node-RED (`1880`) is intentionally **not** published: it is only
+reachable through the Caddy reverse proxy on `443`, with TLS terminated there.
 
 ### Security
 
@@ -181,11 +207,26 @@ external devices and dashboards can connect.
   development-only material and replace them with properly managed certificates
   for anything exposed off the trusted network. Client certificates are not
   required, only the server certificate is verified.
+* **TLS for the HTTP services is terminated by the Caddy reverse proxy**, not by
+  Node-RED itself. Node-RED's port `1880` stays on the internal `ti-dhome`
+  network and Caddy proxies `nodered:1880` through HTTPS. By default Caddy uses
+  its own internal CA (`tls internal`, self-signed): no public DNS needed, ideal
+  for a LAN. For internet exposure, remove that line, point a public domain at
+  the host and Caddy will obtain and auto-renew Let's Encrypt certificates.
+* **Node-RED itself is protected by real credentials**
+  (`etc/nodered/settings.js`, mounted read-only): `adminAuth` guards the editor
+  and admin API, `httpNodeAuth` guards HTTP nodes, and
+  `NODE_RED_CREDENTIAL_SECRET` encrypts the flow credentials in
+  `flows_cred.json`. The admin password bcrypt hash and the credential secret
+  are generated into the git-ignored `workspace/nodered.env` by
+  `make env-secret` + `make password.nodered` and injected as container
+  environment variables. The setup fails closed: until the password is set,
+  logins are rejected.
+* Hardening at the proxy (rate limiting, request logging, and an optional
+  second `basic_auth` layer — see the snippet in `Caddyfile`) can be layered on
+  without touching the services.
 * Only the ports listed above are published to the host; nothing binds all
   services to a public address by default.
-* Node-RED and Victoria Metrics come without built-in authentication: keep them
-  on a trusted network and put a reverse proxy with authentication in front of
-  anything reachable beyond that.
 
 ## Node-RED flows
 
@@ -199,8 +240,10 @@ sidebar. The broker CA (`ca.crt`) is mounted read-only into the Node-RED
 container at `/certs/`; before deploying, open the broker node and fill in the
 Mosquitto password (user `mosquitto`) on the Security tab.
 
-Import any flow from the Node-RED editor UI once the stack is running
-(`Menu ▸ Import`, then paste the JSON, or drag the file onto the editor).
+Open the editor at `https://ti-dhome.lan/` and sign in with the admin user set
+by `make password.nodered`. Import any flow from the editor UI once the stack
+is running (`Menu ▸ Import`, then paste the JSON, or drag the file onto the
+editor).
 
 ## Upgrade images
 

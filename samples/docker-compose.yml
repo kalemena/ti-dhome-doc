@@ -17,15 +17,40 @@ services:
     networks:
       - ti-dhome
 
+  caddy:
+    # https://hub.docker.com/_/caddy
+    # TLS termination in front of Node-RED (see etc/caddy/Caddyfile).
+    # Port 1880 is no longer published: Caddy is the single entry point to
+    # the internal ti-dhome network.
+    image: caddy:2.11.4
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./etc/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data       # TLS certs / Caddy internal CA
+      - caddy-config:/config
+    env_file:
+      - ./workspace/nodered.env
+    networks:
+      - ti-dhome
+    depends_on:
+      - nodered
+
   nodered:
     image: nodered/node-red:5.0.7
     restart: unless-stopped
     environment:
       - TZ=Europe/Paris
-    ports:
-      - "1880:1880"
+    # No published port: reachable only through the Caddy gateway. Editor and
+    # HTTP nodes are protected by adminAuth/httpNodeAuth from the mounted
+    # settings.js; flow credentials are encrypted with the credential secret.
+    env_file:
+      - ./workspace/nodered.env
     volumes:
       - node-red-data:/data
+      - ./etc/nodered/settings.js:/data/settings.js:ro
       - ./workspace/mosquitto/config/certs:/certs:ro
     networks:
       - ti-dhome
@@ -98,6 +123,8 @@ services:
 
 volumes:
   node-red-data:
+  caddy-data:
+  caddy-config:
   victoria-metrics-data:
   vmbackup-tmp:
   grafana-data:
