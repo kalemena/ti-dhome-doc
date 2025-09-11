@@ -2,8 +2,17 @@ THIS_FILE := $(lastword $(MAKEFILE_LIST))
 WORKSPACE := $(PWD)
 SHELL := /bin/bash
 
+# Docker project and images
+COMPOSE_PROJECT_NAME := ti-dhome
 COMPOSE_FILE := docker-compose.yml
-MOSQUITTO_IMAGE := eclipse-mosquitto:2.1.2-alpine
+IMAGE_MOSQUITTO := eclipse-mosquitto:2.1.2-alpine
+IMAGE_NODERED := nodered/node-red:5.0.7
+VM_VERSION := v1.151.0
+IMAGE_VMRESTORE := victoriametrics/vmrestore:$(VM_VERSION)
+HOST_UID := $(shell id -u)
+HOST_GID := $(shell id -g)
+
+# Mosquitto
 PASSWORD_FILE := workspace/mosquitto/config/password.txt
 CERT_DIR := $(PWD)/workspace/mosquitto/config/certs
 CERT_DAYS := 3650
@@ -11,23 +20,25 @@ CERT_CA_SUBJECT := /CN=Ti-DHome MQTT CA
 CERT_SERVER_SUBJECT := /CN=mqtt
 CERT_SERVER_SAN := DNS:mqtt,DNS:localhost,IP:127.0.0.1
 MOSQUITTO_USER := mosquitto
-COMPOSE_PROJECT_NAME := ti-dhome
-NODERED_IMAGE := nodered/node-red:5.0.7
+
+# Node-Red
 NODERED_ENV_FILE := workspace/nodered.env
 NODERED_ADMIN_USER := admin
-CADDY_HOSTNAME := ti-dhome.lan
-VM_VERSION := v1.151.0
-VMBACKUP_IMAGE := victoriametrics/vmbackup:$(VM_VERSION)
-VMRESTORE_IMAGE := victoriametrics/vmrestore:$(VM_VERSION)
-VM_DATA_VOLUME := $(COMPOSE_PROJECT_NAME)_victoria-metrics-data
 NODERED_DATA_VOLUME := $(COMPOSE_PROJECT_NAME)_node-red-data
+
+# Victoria Metrics
+VM_DATA_VOLUME := $(COMPOSE_PROJECT_NAME)_victoria-metrics-data
+
+# Caddy
+CADDY_HOSTNAME := ti-dhome.lan
+
+# Backup
 BACKUP_DIR := backup
 VM_BACKUP_DIR := $(BACKUP_DIR)/vmbackup
-HOST_UID := $(shell id -u)
-HOST_GID := $(shell id -g)
 
 .PHONY: help setup certs mosquitto-dirs password env-secret password.nodered pull up down start stop restart status logs ps backup backup.mosquitto backup.vm backup.nodered restore restore.mosquitto restore.vm restore.nodered config prune rm-volumes clean
 
+# Command Aliases
 DOCKER_COMPOSE := docker-compose -f $(COMPOSE_FILE)
 STOP_SVC := $(DOCKER_COMPOSE) stop
 START_SVC := $(DOCKER_COMPOSE) start
@@ -58,7 +69,7 @@ password: mosquitto-dirs
 		-v $(WORKSPACE)/workspace/mosquitto/data:/mosquitto/data \
 		-v $(WORKSPACE)/workspace/mosquitto/log:/mosquitto/log \
 		-v $(WORKSPACE)/workspace/mosquitto/config:/mosquitto/config \
-		$(MOSQUITTO_IMAGE) \
+		$(IMAGE_MOSQUITTO) \
 		mosquitto_passwd -c /mosquitto/config/password.txt $(MOSQUITTO_USER)
 
 ## env-secret: create workspace/nodered.env with a Node-RED credential secret and Caddy defaults (idempotent)
@@ -83,7 +94,7 @@ password.nodered: env-secret
 	 if test "$$PASS1" != "$$PASS2" || test -z "$$PASS1"; then \
 	   echo "Aborted: passwords do not match or are empty."; exit 1; \
 	 fi; \
-	 HASH=$$(echo "$$PASS1" | docker run --rm -i --entrypoint node $(NODERED_IMAGE) -e "const b=require('bcryptjs');let s='';process.stdin.on('data',c=>s+=c).on('end',()=>process.stdout.write(b.hashSync(s.trim(),10)))"); \
+	 HASH=$$(echo "$$PASS1" | docker run --rm -i --entrypoint node $(IMAGE_NODERED) -e "const b=require('bcryptjs');let s='';process.stdin.on('data',c=>s+=c).on('end',()=>process.stdout.write(b.hashSync(s.trim(),10)))"); \
 	 if test -z "$$HASH"; then \
 	   echo "Failed to generate the password hash (run 'make pull' first)."; exit 1; \
 	 fi; \
@@ -235,7 +246,7 @@ restore.vm:
 	@docker run --rm \
 		-v $(VM_DATA_VOLUME):/victoria-metrics-data \
 		-v $(WORKSPACE)/$(VM_BACKUP_DIR):/backup \
-		$(VMRESTORE_IMAGE) \
+		$(IMAGE_VMRESTORE) \
 		-src=fs:///backup \
 		-storageDataPath=/victoria-metrics-data
 	@$(START_SVC) victoriametrics
