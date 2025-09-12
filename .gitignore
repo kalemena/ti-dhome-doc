@@ -3,3 +3,6 @@ metrics-report.json
 
 *.pyc
 .DS_Store
+
+# Research specifics
+/researches
