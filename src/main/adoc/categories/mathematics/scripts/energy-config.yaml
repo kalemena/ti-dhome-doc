@@ -1,0 +1,89 @@
+# Energy analysis configuration
+# Discovery
+# Selectors below correspond to the real metric names/labels.
+#
+# Naming reconciliation:
+#   -> sensors_zigbee_energy_b{location="C03~Garage~PowerMeter"}
+#   -> sensors_teleinfo_BBRHCJB{location="main"}
+#   -> opendtu_YieldTotal{type="AC"}
+
+vm:
+  url: http://localhost:8428
+
+window:
+  # 1-year analysis window (365 days)
+  start: 2025-09-01T00:00:00Z
+  end: 2026-09-01T00:00:00Z
+
+# Every cumulative counter is treated as a raw reading; scale_to_kwh converts
+# its native unit into kWh (teleinfo counters are Wh).
+metrics:
+  solar_total:
+    description: Solar panel total production (AC, inverter)
+    selector: 'opendtu_YieldTotal{type="AC"}'
+    unit: kWh
+    scale_to_kwh: 1.0
+  grid_in:
+    description: Energy consumed from grid (garage power meter, phase b)
+    selector: 'sensors_zigbee_energy_b{location="C03~Garage~PowerMeter"}'
+    unit: kWh
+    scale_to_kwh: 1.0
+  grid_out:
+    description: Energy produced to grid (garage power meter, phase b)
+    selector: 'sensors_zigbee_energy_produced_b{location="C03~Garage~PowerMeter"}'
+    unit: kWh
+    scale_to_kwh: 1.0
+  tempo_blue_hc:
+    description: Tempo blue day, low-cost hours energy (Linky main meter)
+    selector: 'sensors_teleinfo_BBRHCJB{location="main"}'
+    unit: Wh
+    scale_to_kwh: 0.001
+  tempo_blue_hp:
+    description: Tempo blue day, high-cost hours energy (Linky main meter)
+    selector: 'sensors_teleinfo_BBRHPJB{location="main"}'
+    unit: Wh
+    scale_to_kwh: 0.001
+  tempo_white_hc:
+    description: Tempo white day, low-cost hours energy (Linky main meter)
+    selector: 'sensors_teleinfo_BBRHCJW{location="main"}'
+    unit: Wh
+    scale_to_kwh: 0.001
+  tempo_white_hp:
+    description: Tempo white day, high-cost hours energy (Linky main meter)
+    selector: 'sensors_teleinfo_BBRHPJW{location="main"}'
+    unit: Wh
+    scale_to_kwh: 0.001
+  tempo_red_hc:
+    description: Tempo red day, low-cost hours energy (Linky main meter)
+    selector: 'sensors_teleinfo_BBRHCJR{location="main"}'
+    unit: Wh
+    scale_to_kwh: 0.001
+  tempo_red_hp:
+    description: Tempo red day, high-cost hours energy (Linky main meter)
+    selector: 'sensors_teleinfo_BBRHPJR{location="main"}'
+    unit: Wh
+    scale_to_kwh: 0.001
+
+# Identity check (validation, window 2025-09-01 -> 2026-09-01):
+#   Grid In (zigbee)               = 3 345.9 kWh
+#   Sum of Tempo counters (any)    = 3 406.2 kWh   ->  -1.8 % (OK)
+# Blue HP/HC were never silent; White/Red are silent only when that Tempo
+# color is inactive (spring/summer), in which case the Blue counters cover
+# the consumption. White/Red "gaps" are therefore expected, not missing data.
+# The dates below are the day-window samples where the White/Red counters had
+# no samples at all (inactive periods) - informational only.
+identity_tolerance: 0.05
+
+inactive_counter_days:
+  tempo_white_hp:
+    - "2026-06-19"
+    - "2026-07-20"
+  tempo_white_hc:
+    - "2026-08-19"
+    - "2026-08-31"
+  tempo_red_hp:
+    - "2026-06-19"
+    - "2026-07-20"
+  tempo_red_hc:
+    - "2026-08-19"
+    - "2026-08-31"
