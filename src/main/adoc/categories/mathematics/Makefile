@@ -1,11 +1,24 @@
 THIS_FILE := $(lastword $(MAKEFILE_LIST))
 SCRIPT_DIR := scripts
 
+# Parameters - pass at the command line if you need to override:
+#   make data-quality VM_URL=http://vm:8428 START=2025-09-01 END=2026-09-01
 VM_URL ?= http://localhost:8428
+START ?=
+END ?=
+
 VENV_DIR := $(SCRIPT_DIR)/.venv
 PYTHON_BIN := $(VENV_DIR)/bin/python
 
-.PHONY: all venv setup data-quality clean
+ARGS := -u $(VM_URL)
+ifneq ($(START),)
+ARGS += --start $(START)
+endif
+ifneq ($(END),)
+ARGS += --end $(END)
+endif
+
+.PHONY: all venv setup data-quality solar report-html clean
 
 all: setup data-quality
 
@@ -24,8 +37,10 @@ setup: venv
 ###########################
 
 data-quality:
-	$(PYTHON_BIN) $(SCRIPT_DIR)/01-data-quality.py -u $(VM_URL) \
-		--config $(SCRIPT_DIR)/energy-config.yaml
+	$(PYTHON_BIN) $(SCRIPT_DIR)/01-data-quality.py $(ARGS) \
+		--config $(SCRIPT_DIR)/energy-config.yaml \
+		--output $(SCRIPT_DIR)/output/data-quality.json
+
 
 clean:
 	rm -rf $(VENV_DIR) $(SCRIPT_DIR)/output
