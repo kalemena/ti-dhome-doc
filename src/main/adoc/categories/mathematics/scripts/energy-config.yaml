@@ -23,6 +23,16 @@ metrics:
     selector: 'opendtu_YieldTotal{type="AC"}'
     unit: kWh
     scale_to_kwh: 1.0
+  solar_dc0:
+    description: Solar panel production MPPT channel 0 (DC)
+    selector: 'opendtu_YieldTotal{type="DC",channel="0"}'
+    unit: kWh
+    scale_to_kwh: 1.0
+  solar_dc1:
+    description: Solar panel production MPPT channel 1 (DC)
+    selector: 'opendtu_YieldTotal{type="DC",channel="1"}'
+    unit: kWh
+    scale_to_kwh: 1.0
   grid_in:
     description: Energy consumed from grid (garage power meter, phase b)
     selector: 'sensors_zigbee_energy_b{location="C03~Garage~PowerMeter"}'
@@ -73,6 +83,14 @@ metrics:
 # The dates below are the day-window samples where the White/Red counters had
 # no samples at all (inactive periods) - informational only.
 identity_tolerance: 0.05
+
+# Solar data quality: the only anomaly found over the window is a flat AC
+# counter day (2026-05-24) while the meter exported ~1.9 kWh; the same day
+# shows an incomplete Tempo record. It is excluded from the PASS/FAIL
+# decision.
+known_anomalies:
+  solar_flat_day:
+    - "2026-05-24"
 
 inactive_counter_days:
   tempo_white_hp:

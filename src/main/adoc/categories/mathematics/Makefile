@@ -41,6 +41,16 @@ data-quality:
 		--config $(SCRIPT_DIR)/energy-config.yaml \
 		--output $(SCRIPT_DIR)/output/data-quality.json
 
+solar:
+	$(PYTHON_BIN) $(SCRIPT_DIR)/01-data-quality.py $(ARGS) \
+		--config $(SCRIPT_DIR)/energy-config.yaml --checks solar \
+		--output $(SCRIPT_DIR)/output/data-quality-solar.json
+
+report-html:
+	$(PYTHON_BIN) $(SCRIPT_DIR)/01-data-quality.py $(ARGS) \
+		--config $(SCRIPT_DIR)/energy-config.yaml \
+		--output $(SCRIPT_DIR)/output/data-quality.json \
+		--html $(SCRIPT_DIR)/output/data-quality.html
 
 clean:
 	rm -rf $(VENV_DIR) $(SCRIPT_DIR)/output
