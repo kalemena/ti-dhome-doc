@@ -1,0 +1,353 @@
+= Mathematics - Energy Optimization Plan
+:hardbreaks:
+
+[IMPORTANT]
+====
+This file is a *work plan* for the optimizations described in the
+`readme.adoc` of this category. It is not the implementation: each phase is
+executed after this plan is reviewed. Scripts produced during implementation
+are persisted here for *reproducibility* and are driven by handy `make`
+commands.
+====
+
+== Objective
+
+Answer, with real data held in VictoriaMetrics (1 year of measures), the
+questions raised in `readme.adoc`:
+
+* Is *Tempo* the good contract for our consumption? (contracts comparison)
+* Where is energy consumed over the day/year, vs solar production?
+* Where can consumption be shifted to solar or low-cost hours, and what is
+  the saving under each contract?
+* What if solar production is doubled or tripled? Where is the break-even
+  point, and what battery size is optimal for each production level given
+  our consumption profile?
+
+== Data sources (verified against the live DB)
+
+.Verified metrics
+[cols="1,1,1,2"]
+|===
+| Role
+| Metric (real name)
+| Location label
+| Unit / scaling
+
+| Solar Total
+| opendtu_YieldTotal{type="AC"}
+| (solar inverter, no location)
+| kWh, no scaling
+
+| Grid In
+| sensors_zigbee_energy_b
+| C03~Garage~PowerMeter
+| kWh, no scaling
+
+| Grid Out
+| sensors_zigbee_energy_produced_b
+| C03~Garage~PowerMeter
+| kWh, no scaling
+
+| Tempo HP/HC Blue/White/Red
+| sensors_teleinfo_BBRHPJB / _BBRHCJB (blue)
+| sensors_teleinfo_BBRHPJW / _BBRHCJW (white)
+| sensors_teleinfo_BBRHPJR / _BBRHCJR (red)
+| main
+| Wh, divide by 1000
+|===
+
+[NOTE]
+====
+Metric/location selectors are centralized in `scripts/energy-config.yaml`
+(not hard-coded in scripts). The `readme.adoc` uses abbreviated names
+`zigbee_energy_b` / `teleinfo_BBRHCJB` without the `sensors_` prefix and an
+older `Garage~PowerMeter` location: these are reconciled here and in the
+config file.
+====
+
+== Constraints and strategy
+
+*VictoriaMetrics caps queries at 30 000 000 samples per series.* A global
+`increase(metric[365d])` therefore fails. The adopted strategy is:
+
+* *Per-day sampling:* each counter is read once per day via an instant
+  `max_over_time(metric[1d])` query (each query scans only one day).
+* *Deltas in Python:* daily deltas of the cumulative counters give the daily
+  increments (the pattern validated during the analysis session: 365 daily
+  points from 2025-09-01 to 2026-09-01, all with data).
+* *Hourly record:* hourly counter increments are exported once to CSV
+  (8 760 points per metric) and become the *canonical record*; all
+  downstream analyses (facts, profile, scenarios, batteries) reuse this
+  file, including offline.
+* *Hourly sum:* hour-of-day annual sums are rebuilt from
+  `query_range(step=1h)` over the year + hourly deltas in Python, instead of
+  the equivalent `sum_over_time(increase(metric[1h] offset h)[365d:1d])`.
+* *Caching:* raw daily samples are cached to plain CSV so re-runs are fast
+  and reproducible without re-hitting the database.
+
+== Plan of phases
+
+=== Phase 0 - Discovery probe
+
+*Goal:* confirm the real metric names and label sets for all roles above.
+
+*Actions:*
+- Probe `/api/v1/series` for each candidate selector (opendtu, sensors_zigbee_*,
+  sensors_teleinfo_*).
+- Record exact selectors and units into `scripts/energy-config.yaml`.
+- Confirm a full 365 days of data exist for each selector.
+- *Data-quality check:* per day, compare Grid In daily increment with the sum
+  of *available* Tempo counters (see note below), and classify days:
+  * *inactive-color days:* White/Red counters silent while another color
+    (Blue) increment is active -> expected, not a fault, because a Linky Tempo
+    register only increments when its color/hours split is the active one;
+  * *real gaps:* no tempo counter increments while Grid In > 0 -> flagged.
+
+[NOTE]
+====
+Result of the Phase 0 check (window 2025-09-01 -> 2026-09-01):
+
+* Blue HP/HC: 0 silent days. White/Red silent only on spring/summer days
+* where that color is inactive (76 days total), covered by the Blue counters.
+* Yearly identity: Grid In = 3 345.9 kWh vs sum of Tempo counters = 3 406.2 kWh
+* -> -1.8 % (Tempo over-measures, consistent +2..5 %/month, due to Wh-register
+* rounding vs kWh metering). The 3 remaining days diverging >5 % (Mar/Apr 2026)
+* are sub-kWh border effects.
+====
+
+*Acceptance:* every role in the config maps to a selector returning series
+with data on the full year window, and the yearly Grid In vs sum(Tempo)
+identity holds within the tolerance defined in config (`identity_tolerance`,
+default 5 %).
+
+=== Phase 1 - Shared foundation
+
+Create in `scripts/`:
+
+* `vmlib.py` - VictoriaMetrics helper: per-day sampling, delta computation,
+  1h query_range helper, CSV cache, tariff loader.
+* `energy-config.yaml` - metrics, locations, units/scaling, and the energy
+  tariffs already present in `readme.adoc` (base / blue / tempo / zenfix /
+  zenfix-tempo).
+* `requirements.txt` - `requests`.
+* Makefile at category root with venv + setup + convenience targets (see
+  "Makefile" below).
+
+=== Phase 2 - Hourly export (365-day record)
+
+*File:* `01-hourly-export.py`, target `make export`.
+
+*Goal:* build the *recording* used by every other phase and later mathematics:
+one CSV row per hour of the year, with the hourly *increase* (Wh/kWh per
+hour) of each cumulative counter.
+
+*Computes for each hour of the 365-day window:*
+- Solar Total (opendtu), Grid In and Grid Out (zigbee) hourly increments.
+- Tempo HP/HC Blue, White, Red hourly increments (Wh -> kWh).
+- Derived columns: auto-consumed solar (`solar - grid_out`) and home
+  consumption (`grid_in + auto-consumed`), computed from the raw increments.
+
+*Method:* `query_range(step=1h)` per metric over the year, then hourly
+deltas computed in Python (scaling applied from `energy-config.yaml`). If a
+full-year `query_range` hits the 30M-samples cap, fall back to per-hour
+instant queries (as done in the analysis session).
+
+*Output:* `scripts/output/hourly-energy.csv` (~8 760 rows) with columns
+`utc_hour, solar_total_kwh, grid_in_kwh, grid_out_kwh, tempo_blue_hp_hc,
+tempo_white_hp_hc, tempo_red_hp_hc, auto_consumed_kwh, home_consumption_kwh`.
+
+[NOTE]
+====
+This file is the *single source of truth* for the maths in phases 3..7: they
+read the CSV and work offline. Generation must stay deterministic from a full
+cache.
+====
+
+=== Phase 3 - Yearly facts (readme "Setting the time facts")
+
+*File:* `02-yearly-facts.py`, target `make facts`.
+
+*Computes over the 1-year window (default 2025-09-01 to 2026-09-01):*
+- Solar Total, Grid In, Grid Out (yearly increases).
+- HP/HC Blue, White, Red yearly increases (Wh -> kWh).
+- Auto-consumed Solar = Solar Total - Grid Out.
+- Home Consumption = Grid In + Auto-consumed Solar.
+- Identity check: Grid In vs sum(HP/HC Blue/White/Red), computed over the
+  *available* counters per day (inactive White/Red days are expected and
+  covered by the Blue counters, as established in Phase 0); reported
+  PASS/FAIL against `identity_tolerance` (default 5 %).
+
+*Source:* recomputes totals from `hourly-energy.csv` (offline) rather than
+new DB queries.
+
+*Output:* `scripts/output/facts.csv` + summary printed; identity check
+reported as PASS/FAIL with delta.
+
+=== Phase 4 - Contract comparison (readme "Is Tempo the good contract")
+
+*File:* `03-contract-costs.py`, target `make contracts`.
+
+*Computes the yearly cost under each contract and the ranking:*
+* Base, Blue, Tempo, ZenFix, ZenFix-Tempo - exact formulas from `readme.adoc`
+  (the sum of six teleinfo increases weighted by tariff).
+* "Cost reduction" of Tempo vs Base (absolute and %).
+
+*Source:* the six HP/HC tempo series of `hourly-energy.csv`.
+
+*Output:* `scripts/output/contracts.json` + compact table (contract, cost, delta vs Tempo).
+
+=== Phase 5 - Hourly solar / grid profile (readme "Can we optimize Solar")
+
+*File:* `04-hourly-profile.py`, target `make hourly`.
+
+*Computes for each hour 0..23, over the year:*
+* Solar produced in that hour (opendtu).
+* Grid In in that hour, split by High/Low cost periods (Tempo: HP and HC).
+* Auto-consumed solar per hour (estimate).
+* Surplus balance: Solar - Grid In per hour.
+
+This supersedes functionally `mathematics-solar.py` (kept as legacy, see
+below) and extends it from 3 metrics to the full
+solar/teleinfo/zigbee set.
+
+*Source:* `hourly-energy.csv`.
+
+*Output:* `scripts/output/hourly-profile.csv` (24 lines) + optional Grafana-ready table.
+
+=== Phase 6 - Shift scenarios (readme "Questions - predictions")
+
+*File:* `05-shift-scenarios.py`, target `make scenarios`.
+
+*Models "what if" moves with configurable assumptions (in energy-config.yaml):*
+* Fraction of Tempo High-cost consumption shifted to Low-cost hours.
+* Fraction of High-cost / all consumption shifted to solar hours (midday).
+* Optionally, per-device consumers (Car, Water heater) if their metrics are
+  provided in config (not required today).
+* Recost each scenario under the 5 contracts.
+
+*Source:* hourly consumption profile derived from `hourly-energy.csv`.
+
+*Output:* `scripts/output/scenarios.json` + table of savings vs baseline Tempo.
+
+=== Phase 7 - Solar scaling and battery sizing (new questions)
+
+*File:* `06-solar-scenarios.py`, target `make solar-scenarios`.
+
+*Models "what if we add solar" and "what if we add batteries" based on the
+365-day hourly profiles (solar production and home consumption).*
+
+.*What if we double / triple solar production?*
+- Synthesize scaled solar profiles by multiplying the measured hourly solar
+  by a factor `k in {1, 2, 3}` (assumption: new panels have the same shape;
+  a different orientation is a configurable alternate profile).
+- For each `k`, recompute per hour: auto-consumed solar, Grid Out (excess),
+  Grid In (uncovered consumption), and the resulting yearly cost under each
+  of the 5 contracts.
+- Report break-even: which contract becomes the cheapest as `k` grows, and
+  when Tempo stops being optimal.
+
+.*What if we add batteries?*
+- Hourly simulation for each `k in {1, 2, 3}` and a range of battery
+  capacities (default `5, 10, 15, 20 kWh`, tunable in config), with battery
+  model parameters in config: round-trip efficiency (default 90%), max
+  charge/discharge power (kW), daily cycling.
+- Battery charges from surplus solar (when production > consumption) and
+  discharges to cover consumption (priority: cover grid draw; discharged at
+  replacement of the relevant Tempo color / hours).
+- For each `(k, capacity)` output: increase in auto-consumption %, reduction
+  of Grid In (kWh and %), and yearly cost saving under each contract.
+
+.*Optimal battery size:*
+- Plot / table of marginal savings per added kWh of storage for each `k`
+  (capacity vs yearly saving curve).
+- "Optimal" = capacity where the marginal saving per kWh falls below a
+  configurable threshold (default e.g. 30 cEUR/kWh-year), or where added
+  storage no longer reduces Grid In.
+- One recommended size is emitted per solar scale `k`.
+
+*Output:* `scripts/output/solar-scenarios.json` (k x capacity grid of
+savings) + `scripts/output/battery-sizing.csv` (marginal savings per
+capacity and per k) + summary table.
+
+=== Phase 8 - Packaging and reproducibility
+
+*File:* category Makefile targets `all`, `clean`; outputs/cache layout.
+
+*Actions:*
+- `make all` runs phases 2..7 in order (export, facts, contracts, hourly,
+  scenarios, solar-scenarios).
+- Cache + outputs stay under `scripts/` (git-friendly, no DB dependency).
+- Update `readme.adoc` note to point at the scripts/Makefile usage.
+
+== Makefile
+
+[cols="1,3"]
+|===
+| Target
+| Purpose
+
+| venv
+| Create `scripts/.venv` (python3 -m venv) if missing
+
+| setup
+| pip install -r requirements.txt into the venv
+
+| export
+| Run `01-hourly-export.py` (build the 8 760-row hourly record)
+
+| facts
+| Run `02-yearly-facts.py` (yearly static facts)
+
+| contracts
+| Run `03-contract-costs.py` (contracts comparison)
+
+| hourly
+| Run `04-hourly-profile.py` (24h solar/grid profile)
+
+| scenarios
+| Run `05-shift-scenarios.py` (what-if shift scenarios)
+
+| solar-scenarios
+| Run `06-solar-scenarios.py` (solar x2/x3 + battery sizing)
+
+| all
+| Run export, facts, contracts, hourly, scenarios, solar-scenarios
+
+| clean
+| Remove venv, cache and outputs
+|===
+
+Conventions followed (from the other categories):
+
+* `VM_URL` variable, default `http://localhost:8428`.
+* venv isolated per category, like `datasource-edf/venv` and
+  `maintenance/victoriametrics-db/.venv-metrics`.
+* numbered scripts `01-..06-`, `scripts/output/` for artifacts, like
+  `maintenance/victoriametrics-db/scripts`.
+
+== Deliverables
+
+* `scripts/vmlib.py`, `scripts/energy-config.yaml`, `scripts/requirements.txt`
+* `scripts/01-hourly-export.py`, `02-yearly-facts.py`,
+  `03-contract-costs.py`, `04-hourly-profile.py`, `05-shift-scenarios.py`,
+  `06-solar-scenarios.py`
+* Makefile at category root
+* Outputs: `scripts/output/hourly-energy.csv`, `facts.csv`,
+  `contracts.json`, `hourly-profile.csv`, `scenarios.json`,
+  `solar-scenarios.json`, `battery-sizing.csv`
+* `mathematics-solar.py` kept as legacy (not removed, superseded by 05)
+
+== Acceptance criteria
+
+* All 6 analysis phases run on the live VM via `make` with an empty cache.
+* All 365 days (2025-09-01 -> 2026-09-01) yield data for every metric; any
+  missing day is reported, not silently skipped.
+* `hourly-energy.csv` contains 8 760 rows (+ header) with non-null values for
+  every metric column.
+* Contracts ranking reproduces the order/costs shown in `readme.adoc`
+  (Base > ZenFix > ZenFix-Tempo > Blue > Tempo, with the associated costs).
+* Solar scaling (x2/x3) and battery simulations are deterministic; battery
+  sizing emits a recommended capacity per solar scale `k` where marginal
+  savings drop below the configured threshold.
+* Results are deterministic across runs (cache), and scripts work offline
+  when the cache/hourly record is complete.
