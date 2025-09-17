@@ -102,6 +102,10 @@ config file.
     (Blue) increment is active -> expected, not a fault, because a Linky Tempo
     register only increments when its color/hours split is the active one;
   * *real gaps:* no tempo counter increments while Grid In > 0 -> flagged.
+- *Hourly data-quality check* (`--checks hourly`, target `make hourly-check`):
+  per-hour coverage for every counter (grid in/out, solar AC+DC, the six tempo
+  counters), gap windows, solar daylight gaps vs expected night silence, and
+  solar hourly increments beyond the physical 1 kW panel cap (~1 kWh/h).
 
 [NOTE]
 ====
@@ -113,6 +117,27 @@ Result of the Phase 0 check (window 2025-09-01 -> 2026-09-01):
 * -> -1.8 % (Tempo over-measures, consistent +2..5 %/month, due to Wh-register
 * rounding vs kWh metering). The 3 remaining days diverging >5 % (Mar/Apr 2026)
 * are sub-kWh border effects.
+
+*Solar consistency:* AC total = 1 013.6 kWh vs DC0 + DC1 = 1 013.6 kWh;
+* one flat AC day (2026-05-24) excluded as known anomaly.
+
+*Hourly data-quality check (`make hourly-check`, `--checks hourly`):* asserts
+* hourly samples exist per metric counter and that solar cannot produce more
+* than ~1 kWh/h (1 kW panels). Known anomalies are acknowledged in
+* energy-config.yaml so the check passes while the report still lists them:
+
+* - Grid In / Grid Out: 5 missing hours, single window 2025-10-12 05:00 -> 09:00
+*   (zigbee meter outage) -> acknowledged PASS.
+* - Solar (AC/DC0/DC1): 158 missing hours total; 72 are night silence (no sun,
+*   expected), 62 daylight hours recorded as known anomalies, 24 flat-day hours
+*   (2026-05-24, solar_flat_day) -> acknowledged PASS.
+* - Solar over-max: 13 hourly AC increments beyond the 1.15 kWh/h cap (e.g.
+*   4.42 kWh on 2026-03-17 15:00, 2.62 kWh on 2026-07-08 12:00); DC channels
+*   are a subset of the AC list -> acknowledged PASS.
+* - Teleinfo: 273 stream-gap hours (all six Tempo counters silent together,
+*   recurring daytime outages) + per-counter holes (blue_hc 33, white/red ~49-75).
+*   Deliberately NOT acknowledged -> the hourly check FAILs until these are
+*   reviewed / fixed, so the gaps stay visible.
 ====
 
 *Acceptance:* every role in the config maps to a selector returning series
@@ -291,6 +316,15 @@ capacity and per k) + summary table.
 
 | setup
 | pip install -r requirements.txt into the venv
+
+| data-quality
+| Run `01-data-quality.py` (identity + solar + hourly + coverage)
+
+| solar
+| Run `01-data-quality.py --checks solar` (solar consistency only)
+
+| hourly-check
+| Run `01-data-quality.py --checks hourly` (hourly coverage + solar cap)
 
 | export
 | Run `01-hourly-export.py` (build the 8 760-row hourly record)

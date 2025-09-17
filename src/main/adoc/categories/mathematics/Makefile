@@ -18,7 +18,7 @@ ifneq ($(END),)
 ARGS += --end $(END)
 endif
 
-.PHONY: all venv setup data-quality solar report-html clean
+.PHONY: all venv setup data-quality solar hourly-check report-html clean
 
 all: setup data-quality
 
@@ -45,6 +45,11 @@ solar:
 	$(PYTHON_BIN) $(SCRIPT_DIR)/01-data-quality.py $(ARGS) \
 		--config $(SCRIPT_DIR)/energy-config.yaml --checks solar \
 		--output $(SCRIPT_DIR)/output/data-quality-solar.json
+
+hourly-check:
+	$(PYTHON_BIN) $(SCRIPT_DIR)/01-data-quality.py $(ARGS) \
+		--config $(SCRIPT_DIR)/energy-config.yaml --checks hourly --no-coverage \
+		--output $(SCRIPT_DIR)/output/data-quality-hourly.json
 
 report-html:
 	$(PYTHON_BIN) $(SCRIPT_DIR)/01-data-quality.py $(ARGS) \

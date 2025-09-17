@@ -88,9 +88,114 @@ identity_tolerance: 0.05
 # counter day (2026-05-24) while the meter exported ~1.9 kWh; the same day
 # shows an incomplete Tempo record. It is excluded from the PASS/FAIL
 # decision.
+#
+# Thresholds for the hourly data-quality check ('--checks hourly'):
+#   - solar_max_kwh_per_hour: physical cap for 1 kW of panels (1 kWh/h max);
+#   - solar_max_tolerance_kwh: margin absorbed before flagging a counter jump
+#     as impossible; effective cap = 1.0 + 0.15 = 1.15 kWh/h;
+#   - solar_daylight_hours: UTC hours during which missing solar samples are
+#     abnormal (night silence is expected and not flagged).
+hourly_quality:
+  solar_max_kwh_per_hour: 1.0
+  solar_max_tolerance_kwh: 0.15
+  solar_daylight_hours: [4, 20]
+#
+# Hourly data-quality findings (per-hour UTC slot labels, window start of the
+# hour). These are acknowledged as known/reviewed so the hourly check PASSes;
+# they remain listed in the report:
+#   grid_missing_hour: single zigbee meter outage window 2025-10-12 05:00 -> 09:00
+#   solar_missing_hour: opendtu silence during daylight; the symmetric night
+#     hours are expected (no sun, no samples) and are not listed here.
+#     2026-05-24 is covered by solar_flat_day above.
+#   solar_over_max_hour: hourly AC increment beyond ~1 kWh/h (physical cap for
+#     1 kW of panels); DC channels are all subsets of this AC list.
 known_anomalies:
   solar_flat_day:
     - "2026-05-24"
+  grid_missing_hour:
+    - "2025-10-12 05:00"
+    - "2025-10-12 06:00"
+    - "2025-10-12 07:00"
+    - "2025-10-12 08:00"
+    - "2025-10-12 09:00"
+  solar_missing_hour:
+    - "2025-09-07 09:00"
+    - "2025-09-24 19:00"
+    - "2025-09-25 04:00"
+    - "2025-09-25 05:00"
+    - "2025-09-25 06:00"
+    - "2025-10-04 04:00"
+    - "2025-10-04 05:00"
+    - "2025-10-04 06:00"
+    - "2025-10-22 19:00"
+    - "2025-10-23 04:00"
+    - "2025-10-23 05:00"
+    - "2025-10-23 06:00"
+    - "2025-11-03 04:00"
+    - "2025-11-03 05:00"
+    - "2025-11-03 06:00"
+    - "2025-11-09 19:00"
+    - "2025-11-10 04:00"
+    - "2025-11-10 05:00"
+    - "2025-11-10 06:00"
+    - "2025-11-10 07:00"
+    - "2025-12-24 04:00"
+    - "2025-12-24 05:00"
+    - "2025-12-24 06:00"
+    - "2025-12-24 07:00"
+    - "2025-12-24 08:00"
+    - "2026-03-21 04:00"
+    - "2026-03-21 05:00"
+    - "2026-03-21 06:00"
+    - "2026-03-21 07:00"
+    - "2026-03-21 08:00"
+    - "2026-03-21 09:00"
+    - "2026-04-25 13:00"
+    - "2026-05-11 06:00"
+    - "2026-05-13 09:00"
+    - "2026-05-22 17:00"
+    - "2026-05-25 04:00"
+    - "2026-05-25 05:00"
+    - "2026-05-25 06:00"
+    - "2026-05-25 07:00"
+    - "2026-05-25 08:00"
+    - "2026-05-25 09:00"
+    - "2026-05-25 12:00"
+    - "2026-05-27 04:00"
+    - "2026-06-02 13:00"
+    - "2026-06-29 07:00"
+    - "2026-06-29 08:00"
+    - "2026-06-29 09:00"
+    - "2026-07-01 11:00"
+    - "2026-07-10 12:00"
+    - "2026-07-23 08:00"
+    - "2026-07-23 09:00"
+    - "2026-07-23 10:00"
+    - "2026-07-23 11:00"
+    - "2026-07-23 12:00"
+    - "2026-07-23 13:00"
+    - "2026-07-23 14:00"
+    - "2026-07-23 15:00"
+    - "2026-07-23 16:00"
+    - "2026-08-27 04:00"
+    - "2026-08-27 05:00"
+    - "2026-08-27 06:00"
+    - "2026-08-31 12:00"
+    # solar_dc0 / solar_dc1 (same opendtu device) have the same missing set.
+  solar_over_max_hour:
+    - "2026-03-14 12:00"
+    - "2026-03-16 17:00"
+    - "2026-03-17 15:00"
+    - "2026-06-13 12:00"
+    - "2026-06-21 13:00"
+    - "2026-07-08 12:00"
+    - "2026-07-10 14:00"
+    - "2026-07-11 12:00"
+    - "2026-07-29 10:00"
+    - "2026-07-29 12:00"
+    - "2026-07-29 14:00"
+    - "2026-07-30 18:00"
+    - "2026-08-03 12:00"
 
 inactive_counter_days:
   tempo_white_hp:

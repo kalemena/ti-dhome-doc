@@ -11,13 +11,17 @@ Reproduces, as reusable functions, the probes executed against the live VM:
   4. missing-day classification per counter + deficit by missing combination,
   5. solar consistency check: AC vs sum(DC channels), counter resets, flat
      days, and "exported more than produced" anomalies,
-  6. optional monthly coverage probe per metric,
-  7. optional HTML report rendering.
+  6. hourly data-quality check (per-hour slots): coverage per metric, grid
+     in/out gap windows, solar daylight gaps vs expected night silence, and
+     solar hourly increments beyond the physical panel cap (1 kW panels ->
+     at most ~1 kWh/h; a larger delta means a counter jump / corruption),
+  7. optional monthly coverage probe per metric,
+  8. optional HTML report rendering.
 
 Usage:
     01-data-quality.py [-u VM_URL] [--start YYYY-MM-DD] [--end YYYY-MM-DD]
                        [--config energy-config.yaml] [--output data-quality.json]
-                       [--checks all|identity|solar]
+                       [--checks all|identity|solar|hourly]
                        [--threshold 0.05] [--workers 16] [--html report.html]
                        [--no-coverage]
 """
@@ -88,8 +92,50 @@ DEFAULT_CONFIG = {
         },
     },
     "window": {"start": "2025-09-01T00:00:00Z", "end": "2026-09-01T00:00:00Z"},
+    "hourly_quality": {
+        # 1 kW panels: an hourly kWh increment above this + tolerance is
+        # physically impossible (counter jump / data corruption).
+        "solar_max_kwh_per_hour": 1.0,
+        "solar_max_tolerance_kwh": 0.15,
+        # UTC hour-of-day range (start inclusive, end exclusive) where a
+        # missing sample is relevant for solar: outside it the silence is
+        # expected (opendtu does not sample at night).
+        "solar_daylight_hours": [4, 20],
+    },
     "known_anomalies": {
         "solar_flat_day": ["2026-05-24"],
+        # Gaps identified during the hourly discovery probe (window
+        # 2025-09-01 -> 2026-09-01); recorded so the check stays green while
+        # the report still surfaces them.
+        "grid_missing_hour": [
+            "2025-10-12 05:00", "2025-10-12 06:00",
+            "2025-10-12 07:00", "2025-10-12 08:00", "2025-10-12 09:00",
+        ],
+        "solar_missing_hour": [
+            "2025-09-07 09:00", "2025-09-24 19:00", "2025-09-25 04:00",
+            "2025-09-25 05:00", "2025-09-25 06:00", "2025-10-04 04:00",
+            "2025-10-04 05:00", "2025-10-04 06:00", "2025-10-23 04:00",
+            "2025-10-23 05:00", "2025-10-23 06:00", "2026-04-25 13:00",
+            "2026-06-29 07:00", "2026-06-29 08:00", "2026-06-29 09:00",
+            "2026-07-01 11:00", "2026-07-23 08:00", "2026-07-23 09:00",
+            "2026-07-23 10:00", "2026-07-23 11:00", "2026-07-23 12:00",
+            "2026-07-23 13:00", "2026-07-23 14:00", "2026-07-23 15:00",
+            "2026-07-23 16:00",
+        ],
+        "solar_over_max_hour": [
+            "2026-03-14 13:00", "2026-03-16 18:00", "2026-03-17 16:00",
+            "2026-04-25 14:00", "2026-05-25 10:00", "2026-05-25 13:00",
+            "2026-06-13 13:00", "2026-06-21 14:00", "2026-07-08 13:00",
+            "2026-07-10 13:00", "2026-07-10 15:00", "2026-07-11 13:00",
+            "2026-07-23 17:00", "2026-07-29 11:00", "2026-07-29 13:00",
+            "2026-07-29 15:00", "2026-07-30 19:00", "2026-08-03 13:00",
+        ],
+        # Teleinfo hourly gaps (stream down for all counters) and per-counter
+        # holes were *identified* but not recorded as known: they are real
+        # collection outages, not the expected inactive-color silence, and
+        # should be reviewed / fixed. Fill these lists to acknowledge them:
+        #   teleinfo_stream_gap_hour: [...]
+        #   teleinfo_counter_gap_hour: {tempo_blue_hc: [...], ...}
     },
 }
 
@@ -344,12 +390,256 @@ def coverage_probe(url: str, cfg: dict, start: datetime.datetime,
     return out
 
 
+def fetch_hourly_series(url: str, selector: str, start: datetime.datetime,
+                        end: datetime.datetime) -> dict[int, float]:
+    """Return {unix_ts: counter value} at hourly boundaries for a counter.
+
+    Fetched with query_range(step=1h) over monthly chunks. A full-year
+    query_range exceeds VictoriaMetrics' per-series sample cap for the dense
+    zigbee series (~30k samples/day), so the year is split per calendar month.
+    """
+    vals: dict[int, float] = {}
+    month = start
+    while month < end:
+        nxt = (month.replace(day=28) + datetime.timedelta(days=7)
+               ).replace(day=1)
+        nxt = min(nxt, end)
+        params = urllib.parse.urlencode({
+            "query": selector,
+            "start": month.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "end": nxt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "step": "3600s",
+        })
+        with urllib.request.urlopen(
+                f"{url}/api/v1/query_range?{params}", timeout=120) as r:
+            result = json.load(r)["data"]["result"]
+        if result:
+            for ts, value in result[0]["values"]:
+                vals[int(ts)] = float(value)
+        month = nxt
+    return vals
+
+
+def hourly_check(url: str, cfg: dict, start: datetime.datetime,
+                 n_days: int) -> dict:
+    """Hourly data-quality assertion over the 1-year window.
+
+    For every hourly slot of the window each cumulative counter is expected to
+    yield a value at its start and end boundaries so the hourly increment can
+    be computed. Reports:
+
+    * grid_in / grid_out: missing hourly slots (real measurement gaps), as
+      windows;
+    * solar_*: missing slots split between expected night silence and daylight
+      gaps, plus hourly increments exceeding the physical panel cap (1 kW ->
+      at most ~1 kWh/h); such jumps are flagged as counter corruption;
+    * tempo_*: missing slots per counter; fully-silent days (inactive Tempo
+      color) are expected and not reported as gaps, the shared "stream down"
+      hours (all counters silent) and per-counter holes are surfaced.
+
+    Gaps recorded in `known_anomalies` (grid_missing_hour, solar_missing_hour,
+    solar_over_max_hour) are acknowledged and do not fail the check; the
+    report still lists them.
+    """
+    metrics = cfg["metrics"]
+    hq = {**DEFAULT_CONFIG["hourly_quality"],
+          **cfg.get("hourly_quality", {})}
+    solar_max = hq["solar_max_kwh_per_hour"]
+    solar_tol = hq["solar_max_tolerance_kwh"]
+    dl_start, dl_end = hq["solar_daylight_hours"]
+    known = cfg.get("known_anomalies", {})
+    known_grid = set(known.get("grid_missing_hour", []))
+    known_solar_missing = set(known.get("solar_missing_hour", []))
+    known_over = set(known.get("solar_over_max_hour", []))
+    flat_days = set(known.get("solar_flat_day", []))
+    known_stream = set(known.get("teleinfo_stream_gap_hour", []))
+    known_counter = known.get("teleinfo_counter_gap_hour", {})
+
+    n_hours = n_days * 24
+    boundaries = [int((start + datetime.timedelta(hours=i)).timestamp())
+                  for i in range(n_hours + 1)]
+    hour_of = lambda ts: datetime.datetime.fromtimestamp(
+        ts, datetime.timezone.utc).strftime("%H")
+    iso_label = lambda ts: datetime.datetime.fromtimestamp(
+        ts, datetime.timezone.utc).strftime("%Y-%m-%d %H:%M")
+    day_label = lambda ts: datetime.datetime.fromtimestamp(
+        ts, datetime.timezone.utc).strftime("%Y-%m-%d")
+
+    def is_daylight(ts: int) -> bool:
+        return dl_start <= int(hour_of(ts)) < dl_end
+
+    print("Fetching hourly series (monthly query_range chunks)...")
+    hourly: dict[str, dict[int, float]] = {}
+    for key, m in metrics.items():
+        hourly[key] = fetch_hourly_series(url, m["selector"], start,
+                                          start + datetime.timedelta(
+                                              days=n_days))
+
+    def gap_windows(missing: list[int]) -> list[list[str]]:
+        wins = []
+        for ts in sorted(missing):
+            if wins and ts == boundary_next.get(wins[-1][1]):
+                wins[-1][1] = ts
+            else:
+                wins.append([ts, ts])
+        return [[iso_label(a), iso_label(b)] for a, b in wins]
+
+    # ts -> next boundary timestamp (for chaining gap windows)
+    boundary_next = {}
+    for i, b in enumerate(boundaries[:-1]):
+        boundary_next[b] = boundaries[i + 1]
+
+    def increments(vals) -> list[tuple[int, float]]:
+        out = []
+        for i in range(n_hours):
+            a, b = boundaries[i], boundaries[i + 1]
+            if a in vals and b in vals:
+                out.append((i, vals[b] - vals[a]))
+        return out
+
+    report: dict = {}
+    ok_flags: list[bool] = []
+
+    # ----- grid in / out -----
+    for key in ("grid_in", "grid_out"):
+        vals = hourly[key]
+        missing = [b for b in boundaries if b not in vals]
+        unknown = [ts for ts in missing
+                   if iso_label(ts) not in known_grid]
+        kwh = sum(d for _, d in increments(vals))
+        ok = not unknown
+        ok_flags.append(ok)
+        report[key] = {
+            "ok": ok,
+            "coverage_pct": round(
+                (len(boundaries) - len(missing)) / len(boundaries) * 100, 2),
+            "total_kwh": round(kwh, 2),
+            "missing_slots": [iso_label(ts) for ts in sorted(missing)],
+            "gap_windows": gap_windows(missing),
+            "unknown_gap_windows": gap_windows(unknown),
+            "known_missing_slots": [iso_label(ts) for ts in sorted(missing)
+                                    if iso_label(ts) in known_grid],
+        }
+        print(f"  {key}: {report[key]['coverage_pct']}% covered, "
+              f"{len(missing)} missing hrs, "
+              f"{len([w for w in report[key]['gap_windows']])} gap window(s) -> "
+              f"{'PASS' if ok else 'FAIL'}")
+
+    # ----- solar (AC + DC channels) -----
+    for key in ("solar_total", "solar_dc0", "solar_dc1"):
+        vals = hourly[key]
+        missing = [b for b in boundaries if b not in vals]
+        flat = [ts for ts in sorted(missing)
+                if day_label(ts) in flat_days]
+        rest = [ts for ts in sorted(missing) if ts not in flat]
+        daylight = [ts for ts in rest if is_daylight(ts)]
+        night = [ts for ts in rest if not is_daylight(ts)]
+        unknown_day = [ts for ts in daylight
+                       if iso_label(ts) not in known_solar_missing]
+
+        over = []
+        for i, d in increments(vals):
+            if d > solar_max + solar_tol:
+                over.append({"utc": iso_label(boundaries[i]), "kwh": round(d, 3)})
+        unknown_over = [o for o in over if o["utc"] not in known_over]
+        ok = not unknown_day and not unknown_over
+        ok_flags.append(ok)
+        report[key] = {
+            "ok": ok,
+            "coverage_pct": round(
+                (len(boundaries) - len(missing)) / len(boundaries) * 100, 2),
+            "total_kwh": round(sum(d for _, d in increments(vals)), 2),
+            "daylight_missing_slots": [iso_label(ts) for ts in sorted(daylight)],
+            "unknown_daylight_missing_slots": [iso_label(ts) for ts in sorted(unknown_day)],
+            "night_missing_count": len(night),
+            "flat_day_missing_count": len(flat),
+            "missing_windows": gap_windows(missing),
+            "over_max_hours": over,
+            "unknown_over_max_hours": [o["utc"] for o in unknown_over],
+            "solar_max_kwh_per_hour": solar_max + solar_tol,
+        }
+        print(f"  {key}: {report[key]['coverage_pct']}% covered, "
+              f"daylight missing={len(daylight)} (known days excluded), "
+              f"night silence={len(night)}, over-max={len(over)} -> "
+              f"{'PASS' if ok else 'FAIL'}")
+
+    # ----- tempo counters -----
+    stream_slots = {b for b in boundaries
+                    if all(b not in hourly[k] for k in TEMPO_KEYS)}
+    for key in TEMPO_KEYS:
+        vals = hourly[key]
+        missing = [b for b in boundaries if b not in vals]
+        per_day: dict[str, int] = defaultdict(int)
+        for b in boundaries:
+            if b in vals:
+                per_day[day_label(b)] += 1
+        inactive = sorted(d for d in per_day if per_day[d] == 0)
+        stream = [b for b in missing if b in stream_slots
+                  and iso_label(b) not in known_stream]
+        counter_specific = [b for b in missing
+                            if b not in stream_slots
+                            and per_day.get(day_label(b), 0) > 0
+                            and iso_label(b) not in known_counter.get(key, [])]
+        kwh = sum(d for _, d in increments(vals)) * metrics[key]["scale_to_kwh"]
+        ok = not stream and not counter_specific
+        ok_flags.append(ok)
+        report[key] = {
+            "ok": ok,
+            "coverage_pct": round(
+                (len(boundaries) - len(missing)) / len(boundaries) * 100, 2),
+            "total_kwh": round(kwh, 2),
+            "inactive_day_count": len(inactive),
+            "inactive_days": inactive,
+            "stream_gap_missing": len(stream),
+            "counter_specific_missing": len(counter_specific),
+            "counter_specific_windows": gap_windows(counter_specific),
+        }
+        print(f"  {key}: {report[key]['coverage_pct']}% covered, "
+              f"inactive days={len(inactive)}, "
+              f"stream-gap hrs={len(stream)}, "
+              f"counter-specific hrs={len(counter_specific)} -> "
+              f"{'PASS' if ok else 'FAIL'}")
+
+    stream_gap_list = sorted(stream_slots
+                             - {b for b in boundaries
+                                if iso_label(b) in known_stream})
+    report["teleinfo_stream_gap"] = {
+        "hours": [iso_label(b) for b in stream_gap_list],
+        "count": len(stream_gap_list),
+        "windows": gap_windows(stream_gap_list),
+        "ok": not stream_gap_list,
+    }
+    report["ok"] = all(ok_flags)
+    return report
+
+
 def format_day_list(days: list[str], limit: int = 12) -> str:
     if not days:
         return "-"
     shown = days[:limit]
     suffix = f" (+{len(days) - limit} more)" if len(days) > limit else ""
     return ", ".join(shown) + suffix
+
+
+def _hourly_gap_summary(key: str, m: dict) -> str:
+    if key in ("grid_in", "grid_out"):
+        return f"{len(m['missing_slots'])} missing/silent hours"
+    if key in ("solar_total", "solar_dc0", "solar_dc1"):
+        parts = [
+            f"{len(m['daylight_missing_slots'])} daylight missing",
+            f"{m['night_missing_count']} night-silent",
+        ]
+        if m["over_max_hours"]:
+            parts.append(f"{len(m['over_max_hours'])} over max")
+        return ", ".join(parts)
+    parts = []
+    if m.get("inactive_day_count"):
+        parts.append(f"{m['inactive_day_count']} inactive days")
+    if m.get("stream_gap_missing"):
+        parts.append(f"{m['stream_gap_missing']} stream-gap hrs")
+    if m.get("counter_specific_missing"):
+        parts.append(f"{m['counter_specific_missing']} per-counter hrs")
+    return ", ".join(parts) or "none"
 
 
 def print_report(report: dict, threshold_pct: float) -> None:
@@ -405,6 +695,54 @@ def print_report(report: dict, threshold_pct: float) -> None:
         for k, v in report["coverage"].items():
             print(f"  {k:14} {v['covered_samples']:>3}/{v['total_samples']} "
                   f"({v['coverage_pct']:5.1f}%)  {v['first']} -> {v['last']}")
+
+    if "hourly" in report:
+        h = report["hourly"]
+        print("\n=== hourly coverage (per-hour slots of the window) ===")
+        for key in ("grid_in", "grid_out", "solar_total", "solar_dc0",
+                    "solar_dc1", *TEMPO_KEYS):
+            if key not in h:
+                continue
+            m = h[key]
+            status = "PASS" if m["ok"] else "FAIL"
+            detail = f"{m['coverage_pct']:6.2f}%  total={m['total_kwh']:9.2f} kWh"
+            if key in ("grid_in", "grid_out"):
+                n_win = len(m["gap_windows"])
+                detail += (f"  missing={len(m['missing_slots'])} "
+                           f"({n_win} window(s))")
+                for w in m["gap_windows"][:3]:
+                    detail += f"  [{w[0]} -> {w[1]}]"
+            elif key in ("solar_total", "solar_dc0", "solar_dc1"):
+                detail += (f"  daylight-missing={len(m['daylight_missing_slots'])}"
+                           f"  night-silence={m['night_missing_count']}"
+                           f"  over-max={len(m['over_max_hours'])}")
+            else:
+                detail += (f"  inactive-days={m['inactive_day_count']}"
+                           f"  stream-gap={m['stream_gap_missing']}"
+                           f"  counter-specific={m['counter_specific_missing']}")
+            print(f"  {key:16} {detail}  -> {status}")
+        if "teleinfo_stream_gap" in h:
+            tsg = h["teleinfo_stream_gap"]
+            print(f"  teleinfo stream-gap hours: {tsg['count']}"
+                  f" ({len(tsg['windows'])} window(s)) "
+                  f"-> {'PASS' if tsg['ok'] else 'FAIL'}")
+            if tsg["windows"]:
+                limit = 5
+                for w in tsg["windows"][:limit]:
+                    print(f"     {w[0]} -> {w[1]}")
+                if len(tsg["windows"]) > limit:
+                    print(f"     (+{len(tsg['windows']) - limit} more windows)")
+        for key in ("solar_total", "solar_dc0", "solar_dc1"):
+            m = h[key]
+            if m["over_max_hours"]:
+                print(f"\n  solar >{m['solar_max_kwh_per_hour']} kWh/h "
+                      f"(impossible for 1 kW panels) in {len(m['over_max_hours'])} hours:")
+                for o in m["over_max_hours"][:15]:
+                    print(f"     {o['utc']}  {o['kwh']:.3f} kWh")
+        if not h["ok"]:
+            print("\n  -> FAIL: some hourly gaps are not acknowledged in "
+                  "energy-config.yaml `known_anomalies`; the full lists are "
+                  "in the JSON report.")
 
 
 def render_html(report: dict, path: str, threshold_pct: float) -> None:
@@ -467,6 +805,28 @@ def render_html(report: dict, path: str, threshold_pct: float) -> None:
                 f"({v['coverage_pct']}%)", v["first"], v["last"]]
             for k, v in report["coverage"].items()]))
 
+    if "hourly" in report:
+        h = report["hourly"]
+        rows.append("<h2>Hourly coverage</h2>")
+        rows.append(f"<p>Overall: {'PASS' if h['ok'] else 'FAIL'}</p>")
+        rows.append(table(["Metric", "Coverage", "Total kWh", "Gaps"],
+                          [[key, f"{m['coverage_pct']}%", m["total_kwh"],
+                            _hourly_gap_summary(key, m)]
+                           for key, m in h.items()
+                           if isinstance(m, dict) and "coverage_pct" in m]))
+        if "teleinfo_stream_gap" in h:
+            tsg = h["teleinfo_stream_gap"]
+            rows.append(f"<h3>Teleinfo stream-gap hours ({tsg['count']})</h3>")
+            rows.append(table(["Start", "End"], tsg["windows"][:50]))
+        for key in ("solar_total", "solar_dc0", "solar_dc1"):
+            m = h.get(key)
+            if m and m["over_max_hours"]:
+                rows.append("<h3>Solar hourly increments beyond the "
+                            f"{m['solar_max_kwh_per_hour']} kWh/h physical cap"
+                            "</h3>")
+                rows.append(table(["UTC", "kWh"], [[o["utc"], o["kwh"]]
+                                                   for o in m["over_max_hours"]]))
+
     w = report["window"]
     page = f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
@@ -505,7 +865,7 @@ def main() -> int:
                     help="path to energy-config.yaml")
     ap.add_argument("--output", default="scripts/output/data-quality.json",
                     help="JSON report output path")
-    ap.add_argument("--checks", choices=["all", "identity", "solar"],
+    ap.add_argument("--checks", choices=["all", "identity", "solar", "hourly"],
                     default="all", help="which checks to run (default all)")
     ap.add_argument("--html", default=None,
                     help="also render an HTML report to this path")
@@ -535,6 +895,7 @@ def main() -> int:
 
     run_identity = args.checks in ("all", "identity")
     run_solar = args.checks in ("all", "solar")
+    run_hourly = args.checks in ("all", "hourly")
 
     if run_identity:
         times = boundary_times(start, n_days)
@@ -567,6 +928,12 @@ def main() -> int:
         report["solar"] = solar
         checks_ok.append(solar["ok"])
         print(f"\nSolar consistency: {'PASS' if solar['ok'] else 'FAIL'}")
+
+    if run_hourly:
+        hourly = hourly_check(url, cfg, start, n_days)
+        report["hourly"] = hourly
+        checks_ok.append(hourly["ok"])
+        print(f"\nHourly coverage: {'PASS' if hourly['ok'] else 'FAIL'}")
 
     if not args.no_coverage:
         print("Monthly coverage probe...")
