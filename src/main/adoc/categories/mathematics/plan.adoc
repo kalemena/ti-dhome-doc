@@ -188,6 +188,24 @@ read the CSV and work offline. Generation must stay deterministic from a full
 cache.
 ====
 
+*Solar catch-up correction (target `make correct-solar`).* The opendtu
+`YieldTotal` counters freeze during daylight (repeating identical frames, i.e.
+exact 0.000 increments) and then release the accumulated production in one
+jump that exceeds the ~1 kW panel cap. The energy is real; only its
+*placement* is wrong. The tool redistributes each release backward over the
+preceding frozen/gap hours using a diurnal production template (hour-of-day
+median from clean days), so every hour stays under the physical cap while the
+counter total is preserved. Implemented in `01-data-quality.py` via
+`--correct-solar PREFIX`; it reads VictoriaMetrics but *never writes* to it.
+
+*Output:* `PREFIX-hourly.csv` (one row per hour per solar metric:
+`metric, utc_hour, raw_kwh, corrected_kwh, confidence, flag`) and
+`PREFIX-corrections.json` (per-metric summary + per-event log). Plain missing
+hours that are *not* part of a release are intentionally left empty (listed in
+`known_anomalies.solar_missing_hour`); their unallocated production is reported
+per metric as `unallocated_kwh_in_missing_hours` rather than silently
+interpolated.
+
 === Phase 3 - Yearly facts (readme "Setting the time facts")
 
 *File:* `02-yearly-facts.py`, target `make facts`.

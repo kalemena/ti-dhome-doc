@@ -22,15 +22,19 @@ Usage:
     01-data-quality.py [-u VM_URL] [--start YYYY-MM-DD] [--end YYYY-MM-DD]
                        [--config energy-config.yaml] [--output data-quality.json]
                        [--checks all|identity|solar|hourly]
+                       [--correct-solar OUTPUT_PREFIX]
                        [--threshold 0.05] [--workers 16] [--html report.html]
                        [--no-coverage]
 """
 
 import argparse
+import csv
 import datetime
 import html
 import json
+import math
 import os
+import statistics
 import sys
 import urllib.request
 import urllib.parse
@@ -613,6 +617,248 @@ def hourly_check(url: str, cfg: dict, start: datetime.datetime,
     return report
 
 
+def correct_solar(url: str, cfg: dict, start: datetime.datetime,
+                  n_days: int, output_prefix: str) -> None:
+    """Backward-redistribute opendtu catch-up flushes.
+
+    opendtu occasionally freezes during daylight (repeated identical cumulative
+    YieldTotal frames) and later flushes the accumulated production into a
+    single hourly jump that exceeds the physical 1 kW panel cap. The cumulative
+    counters are the source of truth *after* the flush (the energy was really
+    produced), so the jump is re-sliced back over the frozen/failed daylight
+    hours following an hour-of-day solar production template. The sum over
+    each corrected window is preserved (mass conserving), the counter continues
+    where it was after the flush, and raw VictoriaMetrics data is never
+    modified. Outputs a corrected hourly series CSV and a corrections log
+    (raw vs corrected vs confidence per hour).
+    """
+    metrics = cfg["metrics"]
+    hq = {**DEFAULT_CONFIG["hourly_quality"],
+          **cfg.get("hourly_quality", {})}
+    solar_max = hq["solar_max_kwh_per_hour"]
+    solar_tol = hq["solar_max_tolerance_kwh"]
+    over_max = solar_max + solar_tol
+    flat_kwh = 0.05
+    dl_start, dl_end = hq["solar_daylight_hours"]
+    solar_keys = ("solar_total", "solar_dc0", "solar_dc1")
+
+    n_hours = n_days * 24
+    end = start + datetime.timedelta(days=n_days)
+    boundaries = [int((start + datetime.timedelta(hours=i)).timestamp())
+                  for i in range(n_hours + 1)]
+
+    def hour_of(ts: int) -> int:
+        return datetime.datetime.fromtimestamp(
+            ts, datetime.timezone.utc).hour
+
+    def iso_label(ts: int) -> str:
+        return datetime.datetime.fromtimestamp(
+            ts, datetime.timezone.utc).strftime("%Y-%m-%d %H:%M")
+
+    def day_label(ts: int) -> str:
+        return datetime.datetime.fromtimestamp(
+            ts, datetime.timezone.utc).strftime("%Y-%m-%d")
+
+    def is_daylight(ts: int) -> bool:
+        return dl_start <= hour_of(ts) < dl_end
+
+    print("Fetching solar series for the correction pass...")
+    hourly = {key: fetch_hourly_series(url, metrics[key]["selector"], start,
+                                       end)
+              for key in solar_keys}
+
+    def slot_increments(vals: dict) -> list[float | None]:
+        inc: list[float | None] = [None] * n_hours
+        for i in range(n_hours):
+            a = boundaries[i]
+            b = boundaries[i + 1]
+            if a in vals and b in vals:
+                inc[i] = vals[b] - vals[a]
+        return inc
+
+    def present_hops(vals: dict) -> list[tuple[int, int, int, float]]:
+        idx = [i for i in range(n_hours) if boundaries[i] in vals]
+        hops = []
+        for prev, cur in zip(idx, idx[1:]):
+            hops.append((prev, cur, cur - prev,
+                         vals[boundaries[cur]] - vals[boundaries[prev]]))
+        return hops
+
+    def find_windows(vals: dict, inc: list[float | None]) -> list[dict]:
+        wins = []
+        for prev, cur, hspan, delta in present_hops(vals):
+            if delta <= over_max:
+                continue
+            if hspan > 1:
+                seg = list(range(prev, cur))
+                release = cur - 1
+            else:
+                release = prev
+                s = prev - 1
+                while (s >= 0 and inc[s] is not None
+                       and 0 <= inc[s] <= flat_kwh
+                       and is_daylight(boundaries[s])):
+                    s -= 1
+                seg = list(range(s + 1, prev + 1))
+            raw = sum(x for x in (inc[i] for i in seg) if x is not None)
+            wins.append({"seg": seg, "release": release,
+                         "delta": delta, "raw_sum": raw if raw else delta})
+        wins.sort(key=lambda w: w["seg"][0])
+        merged = []
+        for w in wins:
+            if merged and w["seg"][0] <= merged[-1]["seg"][-1] + 1:
+                merged[-1]["seg"] = list(
+                    range(merged[-1]["seg"][0],
+                          max(w["seg"][-1], merged[-1]["seg"][-1]) + 1))
+                merged[-1]["raw_sum"] += w["raw_sum"]
+                merged[-1]["release"] = max(merged[-1]["release"], w["release"])
+            else:
+                merged.append({"seg": list(w["seg"]), "release": w["release"],
+                               "raw_sum": w["raw_sum"]})
+        return merged
+
+    def build_template(inc: list[float | None], polluted: set) -> tuple[list[float], str]:
+        by_hour: list[list[float]] = [[] for _ in range(24)]
+        for i in range(n_hours):
+            if inc[i] is None:
+                continue
+            if not is_daylight(boundaries[i]):
+                continue
+            if -flat_kwh <= inc[i] <= over_max:
+                d = day_label(boundaries[i])
+                if d not in polluted:
+                    by_hour[hour_of(boundaries[i])].append(inc[i])
+        profile: list[float | None] = [None] * 24
+        for h in range(24):
+            if by_hour[h]:
+                profile[h] = statistics.median(by_hour[h])
+        if profile.count(None) <= 20:
+            arr = [max(p, 0.0) if p is not None else 0.0 for p in profile]
+            for h in range(24):
+                if not (dl_start <= h < dl_end):
+                    arr[h] = 0.0
+            kern = [math.exp(-(d * d) / 2.0) for d in range(-3, 4)]
+            ks = sum(kern)
+            out = []
+            for h in range(24):
+                s = 0.0
+                for off, w in zip(range(-3, 4), kern):
+                    s += w * arr[(h + off) % 24]
+                out.append(s / ks)
+            for h in range(24):
+                if not (dl_start <= h < dl_end):
+                    out[h] = 0.0
+            return out, "median"
+        gauss = []
+        for h in range(24):
+            gauss.append(math.exp(-((h - 12.0) ** 2) / (2 * 2.5 ** 2))
+                         if dl_start <= h < dl_end else 0.0)
+        return gauss, "gaussian"
+
+    def reslice(seg: list[int], raw_sum: float, templ: list[float]) -> tuple[list[float], list[int]]:
+        w = [templ[hour_of(boundaries[i])] for i in seg]
+        tot_w = sum(w)
+        if tot_w <= 1e-9:
+            w = [1.0 if is_daylight(boundaries[i]) else 0.0 for i in seg]
+            tot_w = sum(w)
+        if tot_w <= 1e-9:
+            return [], []
+        return [raw_sum * w[k] / tot_w for k in range(len(seg))], w
+
+    all_rows: list[tuple] = []
+    corrections: list[dict] = []
+    summary: dict = {}
+
+    for key in solar_keys:
+        vals = hourly[key]
+        inc = slot_increments(vals)
+        wins = find_windows(vals, inc)
+        polluted = {day_label(boundaries[i]) for w in wins for i in w["seg"]}
+        templ, kind = build_template(inc, polluted)
+
+        corrected = list(inc)
+        conf = [1.0 if d is not None else 0.0 for d in inc]
+        flag = ["ok" if d is not None else "missing" for d in inc]
+
+        for w in wins:
+            seg = list(w["seg"])
+            raw_sum = w["raw_sum"]
+            guard = 0
+            while guard < 72:
+                new, weights = reslice(seg, raw_sum, templ)
+                if not new:
+                    break
+                if max(new) <= over_max + 1e-9:
+                    break
+                s0 = seg[0]
+                if (s0 < 1 or inc[s0 - 1] is None
+                        or not is_daylight(boundaries[s0 - 1])):
+                    break
+                seg.insert(0, s0 - 1)
+                if inc[s0 - 1] is not None and inc[s0 - 1] >= 0:
+                    raw_sum += inc[s0 - 1]
+                guard += 1
+            new, weights = reslice(seg, raw_sum, templ)
+            if not new:
+                continue
+            for k, i in enumerate(seg):
+                corrected[i] = new[k]
+                conf[i] = 0.6
+                flag[i] = "flush" if i == w["release"] else "redist"
+            release_kwh = new[seg.index(w["release"])]
+            corrections.append({
+                "metric": key,
+                "release_hour": iso_label(boundaries[w["release"]]),
+                "window_start": iso_label(boundaries[seg[0]]),
+                "window_end": iso_label(boundaries[seg[-1] + 1]),
+                "slots": len(seg),
+                "window_kwh": round(w["raw_sum"], 3),
+                "release_raw_kwh": round(inc[w["release"]], 3)
+                if inc[w["release"]] is not None else None,
+                "release_kwh": round(release_kwh, 3),
+                "per_slot_max_kwh": round(max(new), 3),
+                "template": kind,
+            })
+        max_inc = max((c for c in corrected if c is not None), default=0.0)
+        true_kwh = max(vals.values()) - min(vals.values())
+        corr_kwh = sum(c or 0.0 for c in corrected)
+        missing_slots = sum(1 for d in inc if d is None)
+        summary[key] = {
+            "events": len(wins),
+            "corrected_slots": sum(1 for i in range(n_hours)
+                                   if corrected[i] is not None and flag[i] != "ok"),
+            "max_corrected_kwh": round(max_inc, 3),
+            "corrected_total_kwh": round(corr_kwh, 2),
+            "counter_total_kwh": round(true_kwh, 2),
+            "unallocated_kwh_in_missing_hours": round(max(true_kwh - corr_kwh, 0.0), 2),
+            "missing_hour_count": missing_slots,
+        }
+        print(f"  {key}: {len(wins)} flush window(s), "
+              f"max corrected hourly increment = {max_inc:.3f} kWh/h "
+              f"(cap {over_max:.2f}), "
+              f"{missing_slots} missing hours left as-is")
+        for i in range(n_hours):
+            all_rows.append((key, iso_label(boundaries[i]), inc[i],
+                             corrected[i], conf[i], flag[i]))
+
+    os.makedirs(os.path.dirname(output_prefix) or ".", exist_ok=True)
+    with open(f"{output_prefix}-hourly.csv", "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["metric", "utc_hour", "raw_kwh", "corrected_kwh",
+                    "confidence", "flag"])
+        for key, utc, raw, corr, c, fl in all_rows:
+            w.writerow([key, utc,
+                        "" if raw is None else round(raw, 4),
+                        "" if corr is None else round(corr, 4),
+                        round(c, 3), fl])
+    print(f"Corrected hourly series: {output_prefix}-hourly.csv")
+
+    with open(f"{output_prefix}-corrections.json", "w") as f:
+        json.dump({"window": {"start": start.isoformat(), "end": end.isoformat()},
+                   "summary": summary, "events": corrections}, f, indent=2)
+    print(f"Corrections log:        {output_prefix}-corrections.json")
+
+
 def format_day_list(days: list[str], limit: int = 12) -> str:
     if not days:
         return "-"
@@ -867,6 +1113,10 @@ def main() -> int:
                     help="JSON report output path")
     ap.add_argument("--checks", choices=["all", "identity", "solar", "hourly"],
                     default="all", help="which checks to run (default all)")
+    ap.add_argument("--correct-solar", default=None, metavar="PREFIX",
+                    help="run the solar catch-up correction pass and write "
+                         "PREFIX-hourly.csv + PREFIX-corrections.json "
+                         "(raw VM data is never modified)")
     ap.add_argument("--html", default=None,
                     help="also render an HTML report to this path")
     ap.add_argument("--threshold", type=float, default=0.05,
@@ -887,6 +1137,11 @@ def main() -> int:
 
     print(f"VM: {url}")
     print(f"Window: {start:%Y-%m-%d} -> {end:%Y-%m-%d} ({n_days} days)")
+
+    if args.correct_solar:
+        correct_solar(url, cfg, start, n_days, args.correct_solar)
+        return 0
+
     print("Sampling daily max_over_time per counter...")
 
     report = {"window": {"start": start.isoformat(), "end": end.isoformat()},

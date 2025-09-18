@@ -18,7 +18,7 @@ ifneq ($(END),)
 ARGS += --end $(END)
 endif
 
-.PHONY: all venv setup data-quality solar hourly-check report-html clean
+.PHONY: all venv setup data-quality solar hourly-check correct-solar report-html clean
 
 all: setup data-quality
 
@@ -50,6 +50,13 @@ hourly-check:
 	$(PYTHON_BIN) $(SCRIPT_DIR)/01-data-quality.py $(ARGS) \
 		--config $(SCRIPT_DIR)/energy-config.yaml --checks hourly --no-coverage \
 		--output $(SCRIPT_DIR)/output/data-quality-hourly.json
+
+# Corrected solar series (backward-redistribution of opendtu catch-up
+# flushes); raw VictoriaMetrics data is never modified.
+correct-solar:
+	$(PYTHON_BIN) $(SCRIPT_DIR)/01-data-quality.py $(ARGS) \
+		--config $(SCRIPT_DIR)/energy-config.yaml \
+		--correct-solar $(SCRIPT_DIR)/output/solar-corrected
 
 report-html:
 	$(PYTHON_BIN) $(SCRIPT_DIR)/01-data-quality.py $(ARGS) \
