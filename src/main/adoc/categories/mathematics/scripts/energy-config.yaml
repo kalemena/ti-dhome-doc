@@ -74,6 +74,52 @@ metrics:
     unit: Wh
     scale_to_kwh: 0.001
 
+# Energy tariffs (EUR/kWh, contract formulas from readme.adoc "Costs of Energy"):
+#   base         single fixed rate all year            (kWhBase)
+#   blue         HC/HP split, HP = 6h..22h            (kWhHC / kWhHP)
+#   tempo        per Tempo color (blue/white/red) x HC/HP
+#                (kWhTBHC, kWhTBHP, kWhTWHC, kWhTWHP, kWhTRHC, kWhTRHP)
+#   zenfix       single fixed rate all year            (kWhZenFix)
+#   zenfix-tempo HC/HP split, HP = 8h..12h + 17h..20h  (kWhZenFixHC / kWhZenFixHP)
+#
+# `hp_hours`: UTC hour windows considered High-price ("Heures Pleines") for that
+# contract (informational; vmlib attributes per-hour energy to HP/HC from these
+# windows for contracts that split by time of day).
+# `rates` (tempo): per Tempo color x period, plain names (the metrics above
+# carry the `tempo_` prefix).
+tariffs:
+  base:
+    description: Fixed Cost (same price all hours)
+    kind: flat
+    rate_per_kwh: 0.2016
+  blue:
+    description: High/Low Cost (High = 6am to 10pm)
+    kind: hp_hc
+    hc_rate_per_kwh: 0.1696
+    hp_rate_per_kwh: 0.2146
+    hp_hours: [[6, 22]]
+  tempo:
+    description: High/Low Cost (High = 6am to 10pm) x High/Medium/Low days of year
+    kind: tempo
+    hp_hours: [[6, 22]]
+    rates:
+      blue_hc: 0.1288
+      blue_hp: 0.1552
+      white_hc: 0.1447
+      white_hp: 0.1792
+      red_hc: 0.1518
+      red_hp: 0.6586
+  zenfix:
+    description: Fixed Cost - other contract
+    kind: flat
+    rate_per_kwh: 0.1753
+  zenfix-tempo:
+    description: High/Low Cost (High = 8h to 12h, and 17h to 20h)
+    kind: hp_hc
+    hc_rate_per_kwh: 0.1608
+    hp_rate_per_kwh: 0.2028
+    hp_hours: [[8, 12], [17, 20]]
+
 # Identity check (validation, window 2025-09-01 -> 2026-09-01):
 #   Grid In (zigbee)               = 3 345.9 kWh
 #   Sum of Tempo counters (any)    = 3 406.2 kWh   ->  -1.8 % (OK)

@@ -18,7 +18,8 @@ ifneq ($(END),)
 ARGS += --end $(END)
 endif
 
-.PHONY: all venv setup data-quality solar hourly-check correct-solar report-html clean
+.PHONY: all venv setup data-quality solar hourly-check correct-solar report-html \
+	export facts contracts hourly scenarios solar-scenarios clean
 
 all: setup data-quality
 
@@ -64,5 +65,46 @@ report-html:
 		--output $(SCRIPT_DIR)/output/data-quality.json \
 		--html $(SCRIPT_DIR)/output/data-quality.html
 
+###########################
+# Analysis phases (2..7)
+# Targets are wired now so the Makefile matches the plan; each script lands
+# with its phase. Run `make setup` once (venv + requirements) beforehand.
+###########################
+
+export:
+	$(PYTHON_BIN) $(SCRIPT_DIR)/01-hourly-export.py $(ARGS) \
+		--config $(SCRIPT_DIR)/energy-config.yaml \
+		--output $(SCRIPT_DIR)/output/hourly-energy.csv
+
+facts:
+	$(PYTHON_BIN) $(SCRIPT_DIR)/02-yearly-facts.py \
+		--config $(SCRIPT_DIR)/energy-config.yaml \
+		--input $(SCRIPT_DIR)/output/hourly-energy.csv \
+		--output $(SCRIPT_DIR)/output/facts.csv
+
+contracts:
+	$(PYTHON_BIN) $(SCRIPT_DIR)/03-contract-costs.py \
+		--config $(SCRIPT_DIR)/energy-config.yaml \
+		--input $(SCRIPT_DIR)/output/hourly-energy.csv \
+		--output $(SCRIPT_DIR)/output/contracts.json
+
+hourly:
+	$(PYTHON_BIN) $(SCRIPT_DIR)/04-hourly-profile.py \
+		--config $(SCRIPT_DIR)/energy-config.yaml \
+		--input $(SCRIPT_DIR)/output/hourly-energy.csv \
+		--output $(SCRIPT_DIR)/output/hourly-profile.csv
+
+scenarios:
+	$(PYTHON_BIN) $(SCRIPT_DIR)/05-shift-scenarios.py \
+		--config $(SCRIPT_DIR)/energy-config.yaml \
+		--input $(SCRIPT_DIR)/output/hourly-energy.csv \
+		--output $(SCRIPT_DIR)/output/scenarios.json
+
+solar-scenarios:
+	$(PYTHON_BIN) $(SCRIPT_DIR)/06-solar-scenarios.py \
+		--config $(SCRIPT_DIR)/energy-config.yaml \
+		--input $(SCRIPT_DIR)/output/hourly-energy.csv \
+		--output $(SCRIPT_DIR)/output/solar-scenarios.json
+
 clean:
-	rm -rf $(VENV_DIR) $(SCRIPT_DIR)/output
+	rm -rf $(VENV_DIR) $(SCRIPT_DIR)/output $(SCRIPT_DIR)/cache
