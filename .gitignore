@@ -7,3 +7,4 @@ metrics-report.json
 # Research specifics
 /researches
 output/
+cache/
