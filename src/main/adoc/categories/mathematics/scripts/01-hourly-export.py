@@ -12,6 +12,10 @@ For each hour of the window (default 2025-09-01 -> 2026-09-01):
   * grid_in_kwh / grid_out_kwh   zigbee meter hourly increments
   * tempo_{blue,white,red}_hp_hc teleinfo HP+HC increments per Tempo color
                                  (Wh -> kWh, both halves summed)
+  * tempo_{blue,white,red}_{hp,hc} the six individual teleinfo registers
+                                 (HP and HC separately, Wh -> kWh); these
+                                 encode the exact HP/HC split used by the
+                                 contract pricing (Phase 4)
   * auto_consumed_kwh            solar_total - grid_out
   * home_consumption_kwh         grid_in + auto_consumed
 
@@ -65,6 +69,9 @@ OUTPUT_COLUMNS = [
     "utc_hour",
     "solar_total_kwh", "grid_in_kwh", "grid_out_kwh",
     "tempo_blue_hp_hc", "tempo_white_hp_hc", "tempo_red_hp_hc",
+    "tempo_blue_hp", "tempo_blue_hc",
+    "tempo_white_hp", "tempo_white_hc",
+    "tempo_red_hp", "tempo_red_hc",
     "auto_consumed_kwh", "home_consumption_kwh",
 ]
 
@@ -158,6 +165,12 @@ def main() -> int:
                 "tempo_blue_hp_hc": tempo["blue"][i],
                 "tempo_white_hp_hc": tempo["white"][i],
                 "tempo_red_hp_hc": tempo["red"][i],
+                "tempo_blue_hp": inc["tempo_blue_hp"][i],
+                "tempo_blue_hc": inc["tempo_blue_hc"][i],
+                "tempo_white_hp": inc["tempo_white_hp"][i],
+                "tempo_white_hc": inc["tempo_white_hc"][i],
+                "tempo_red_hp": inc["tempo_red_hp"][i],
+                "tempo_red_hc": inc["tempo_red_hc"][i],
                 "auto_consumed_kwh": auto[i],
                 "home_consumption_kwh": home[i],
             }
@@ -178,6 +191,12 @@ def main() -> int:
                    ("tempo_blue_hp_hc", tempo["blue"]),
                    ("tempo_white_hp_hc", tempo["white"]),
                    ("tempo_red_hp_hc", tempo["red"]),
+                   ("tempo_blue_hp", inc["tempo_blue_hp"]),
+                   ("tempo_blue_hc", inc["tempo_blue_hc"]),
+                   ("tempo_white_hp", inc["tempo_white_hp"]),
+                   ("tempo_white_hc", inc["tempo_white_hc"]),
+                   ("tempo_red_hp", inc["tempo_red_hp"]),
+                   ("tempo_red_hc", inc["tempo_red_hc"]),
                    ("auto_consumed_kwh", auto),
                    ("home_consumption_kwh", home),
                ]}
