@@ -248,6 +248,7 @@ reported as PASS/FAIL with delta.
 * Grid In in that hour, split by High/Low cost periods (Tempo: HP and HC).
 * Auto-consumed solar per hour (estimate).
 * Surplus balance: Solar - Grid In per hour.
+* Provide seasonal highlights by splitting into 4 seasons measure comparing metrics fro grid in/out and solr production
 
 This supersedes functionally `mathematics-solar.py` (kept as legacy, see
 below) and extends it from 3 metrics to the full

@@ -130,6 +130,16 @@ tariffs:
 # no samples at all (inactive periods) - informational only.
 identity_tolerance: 0.05
 
+# Meteorological seasons for the Phase 5 seasonal highlights
+# (`04-hourly-profile.py`). UTC months of the record's `utc_hour` labels;
+# order of the dict is the output order (autumn -> winter -> spring -> summer
+# follows the 2025-09-01 -> 2026-09-01 window).
+seasons:
+  autumn: [9, 10, 11]
+  winter: [12, 1, 2]
+  spring: [3, 4, 5]
+  summer: [6, 7, 8]
+
 # Solar data quality: the only anomaly found over the window is a flat AC
 # counter day (2026-05-24) while the meter exported ~1.9 kWh; the same day
 # shows an incomplete Tempo record. It is excluded from the PASS/FAIL
