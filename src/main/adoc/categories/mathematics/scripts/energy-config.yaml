@@ -266,3 +266,44 @@ inactive_counter_days:
   tempo_red_hc:
     - "2026-08-19"
     - "2026-08-31"
+
+# Phase 6 - shift scenario assumptions (`05-shift-scenarios.py`,
+# target `make scenarios`, readme "Question - predictions").
+# "What if we move some consumption?": each scenario moves a fraction of the
+# year's billed energy from costlier hours to cheaper hours and re-prices the
+# resulting six-register split under the 5 contracts, keeping the baseline
+# (Tempo, no move) as the reference.
+#
+# Two scenario families, fully configurable here:
+#
+# * `hp_to_hc_fractions`: move a fraction of each *Tempo High-cost* (HP)
+#   register into the Low-cost (HC) register of the *same Tempo color*. Under
+#   Tempo the HP window is 6am-10pm, the rest is HC, so this models "delay the
+#   heaters / the car to night hours". Energy is conserved; only the period
+#   register moves. One scenario is emitted per fraction.
+#
+# * `to_solar`: move consumption to the midday solar window (`window_hours`,
+#   UTC). The moved energy first displaces the solar that is currently
+#   exported to the grid (that export is billed 0 EUR, so the billed grid draw
+#   drops by exactly the displaced amount); the uncovered remainder becomes
+#   new grid draw at the destination hour (Tempo HP). `source` selects which
+#   energy moves:
+#     - hp : the High-cost registers only (Tempo high hours),
+#     - all: every register (also the cheap night loads).
+#   Displacement is capped by the window's actual export, so the saving is
+#   bounded by the ~237 kWh/year currently sent to the grid.
+#   One scenario is emitted per (source, fraction).
+#
+# * `devices`: optional per-device consumers (Car, Water heater, ...). Each
+#   entry names a `column` of hourly-energy.csv (today none exists) and a
+#   `shiftable_fraction`; when present, a scenario moves that fraction of the
+#   device's hourly energy to the solar window. None are configured today -
+#   the key only documents the plumbing and is inert until a metric exists.
+shift_scenarios:
+  hp_to_hc_fractions: [0.25, 0.5, 0.75]
+  to_solar:
+    source_fractions:
+      hp: 0.5
+      all: 0.5
+    window_hours: [[10, 16]]
+  devices: {}
