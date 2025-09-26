@@ -307,3 +307,52 @@ shift_scenarios:
       all: 0.5
     window_hours: [[10, 16]]
   devices: {}
+
+# Phase 7 - solar scaling and battery sizing (`06-solar-scenarios.py`,
+# target `make solar-scenarios`, readme "Question - predictions").
+#
+# "What if we add solar / batteries?" based on the 365-day hourly profiles of
+# hourly-energy.csv (offline, deterministic).
+#
+# * `scale_factors`: synthetic solar profiles = measured hourly solar x k.
+#   Every k is re-computed per hour (auto-consumed solar, Grid Out excess,
+#   Grid In uncovered consumption) and re-priced under the 5 contracts.
+#   Assumption: new panels have the same diurnal shape as the measured ones.
+#
+# * `break_even`: the fine k scan used to find where Tempo stops being the
+#   cheapest contract (`tempo_stops_optimal_at_k`). `table_factors` is the
+#   subset printed in the report.
+#
+# * `battery`: hourly simulation model parameters (see the plan phases):
+#   - `capacities_kwh`: the (k x capacity) savings grid reported per k;
+#   - `round_trip_efficiency`: fraction of stored energy returned, the
+#     inverse is charged as loss from the surplus pool (0.9 = 10 % loss);
+#   - `max_charge_power_kw` / `max_discharge_power_kw`: per-hour kWh caps;
+#   - `max_daily_cycles`: optional cap on energy charged per UTC day
+#     (full cycles x capacity); null = no cap;
+#   - `sizing_step_kwh` / `sizing_max_kwh`: resolution and upper bound of the
+#     marginal-savings sweep used to recommend a capacity per k.
+#
+# * `marginal_saving_threshold_eur_per_kwh`: yearly saving (EUR) that the last
+#   added kWh of storage must return to still be worth adding. The
+#   recommended capacity per k is the largest sweep step whose marginal value
+#   is still >= this threshold (30 cEUR/kWh-year default).
+#   `marginal_reference_contract`: 'best' sizes against the cheapest contract
+#   at that k; a contract name instead fixes the reference.
+solar_scenarios:
+  scale_factors: [1.0, 2.0, 3.0]
+  break_even:
+    k_min: 1.0
+    k_max: 4.0
+    k_step: 0.1
+    table_factors: [1.0, 1.5, 2.0, 2.5, 3.0, 4.0]
+  battery:
+    capacities_kwh: [5, 10, 15, 20]
+    round_trip_efficiency: 0.9
+    max_charge_power_kw: 3.5
+    max_discharge_power_kw: 3.5
+    max_daily_cycles: null
+    sizing_step_kwh: 1.0
+    sizing_max_kwh: 30.0
+  marginal_saving_threshold_eur_per_kwh: 0.30
+  marginal_reference_contract: best
