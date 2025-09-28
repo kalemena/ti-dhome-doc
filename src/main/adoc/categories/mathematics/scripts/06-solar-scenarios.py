@@ -340,7 +340,7 @@ def main() -> int:
         if capacities:
             imp = list(scaled["grid_in_no_bat_kwh"])
             pool = list(scaled["export_pool_kwh"])
-            for cap in capacities:
+            for cap in [0.0] + capacities:
                 sim = simulate_battery(imp, pool, cap, efficiency,
                                        max_charge, max_discharge,
                                        max_daily_cycles)
