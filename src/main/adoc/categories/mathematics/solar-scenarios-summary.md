@@ -58,3 +58,58 @@ contracts; **Tempo is the cheapest contract in every combination** below.
   arbitrage, and the savings ride on top of the (battery-free) solar-scaling
   gain. The battery materially helps self-consumption, but as an *investment*
   it only approaches reasonableness at `k=3` with a 4 kWh unit.
+
+## Night grid-charging scenario (Tempo HC arbitrage)
+
+A second model lets the battery also buy from the grid **at night**, at the
+Tempo **Low-cost (HC)** rate of the night's color, to cover the next day's
+**High-cost (HP)** draw. The rule keeps paid charging subordinate to free sun
+(`night_grid_charge` in `energy-config.yaml`; implementation
+`simulate_battery_night` in `06-solar-scenarios.py`):
+
+- Per UTC day, solar surplus is the *first* fill: the battery charges from
+  the would-be export pool exactly as before.
+- Grid charging only runs in the pre-dawn HC window (hours 0–5 UTC) and is
+  capped per day at `capacity − day_surplus`: it **buys only the capacity the
+  sun won't fill for free**, never charge-for-then-export kWh.
+- Charging is billed at the night's Tempo color × HC (~0.13–0.15 €/kWh);
+  **discharge serves HP hours only**, so stored energy displaces the costliest
+  power (HPs are ~58 % of the Tempo-metered draw).
+
+### Tempo cost vs solar-only battery, same k
+
+| k | Battery | Night cost | Δ vs solar-only | Grid bought | Grid In − |
+|---|---------|-----------|-----------------|-------------|-----------|
+| 1 | 4 | **489.89 €** | −30.9 € | 1 123.8 kWh | 1 145.2 kWh |
+| | 8 | **478.46 €** | −41.7 € | 1 584.4 kWh | 1 533.4 kWh |
+| | 16 | **479.25 €** | −40.9 € | 1 659.8 kWh | 1 590.4 kWh |
+| 2 | 4 | **384.30 €** | −0.2 € | 748.4 kWh | 1 041.0 kWh |
+| | 8 | 400.71 € | **+26.1 €** | 1 302.0 kWh | 1 341.6 kWh |
+| | 16 | 408.11 € | **+36.7 €** | 1 399.3 kWh | 1 378.2 kWh |
+| 3 | 4 | 334.60 € | **+17.3 €** | 514.3 kWh | 962.7 kWh |
+| | 8 | 345.24 € | **+54.7 €** | 956.5 kWh | 1 220.9 kWh |
+| | 16 | 377.47 € | **+104.0 €** | 1 211.5 kWh | 1 233.2 kWh |
+
+Columns: Tempo cost with night charging; Δ vs the solar-only battery at the
+same k (`+` = night charging costs *more*); grid energy actually bought (paid
+as drawn, 90 % stored); grid-in reduction vs the k-level no-battery case.
+
+### Reading
+
+- **Night charging shines only when solar is scarce.** At `k=1` it targets the
+  site's real weakness — nearly 2 000 kWh/yr of HP imports at blue/white/red
+  HP prices — and doubles the battery's value (4 kWh: 36.84 → 67.69 €/yr).
+  The 8 kWh points get ~parity (79.12 € @ 8 vs 78.33 € @ 16): saturation again.
+- **With enough solar it backfires.** At `k=2` and `k=3` the two sources
+  compete for the same tank: a battery already filled at night wastes the
+  day's free sunlight (exported at ~0 €/kWh feed-in) while the HC bill piles
+  up. 16 kWh at `k=3` is ~104 €/yr *worse* than the same battery solar-only.
+- **Verdict:** the clever win is *small-solar + small battery, night
+  arbitrage*. It never resurrects the ROI story from the table above — a 4 kWh
+  unit at `k=1` rises from 27.1 to 14.8 yr payback (1 000 € / 67.69 €), still
+  past battery lifetime, and any bigger battery only erodes that.
+- **Model caveats:** discharge remains HP-priority (a design choice, not an
+  optimum — the same model could equally trade HC-in for HC-out on blue days,
+  where the margin is ~1 c€/kWh and barely worth a battery cycle). The
+  `auto-consumed %` figure is not reported for this variant because grid-stored
+  kWh count as on-site consumption and push it past 100 %.

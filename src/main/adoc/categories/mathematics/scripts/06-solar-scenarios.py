@@ -207,6 +207,86 @@ def simulate_battery(imp: list[float], pool: list[float], capacity: float,
     }
 
 
+def simulate_battery_night(imp: list[float], pool: list[float],
+                           day_surplus: list[float], hour_period: list[str],
+                           capacity: float, efficiency: float, max_charge: float,
+                           max_discharge: float,
+                           max_daily_cycles: float | None) -> dict:
+    """Battery model with night grid charging (Tempo HC arbitrage).
+
+    Same hourly chronological engine that charges from the would-be export
+    pool, extended with paid charging from the grid during the pre-dawn night
+    hours (UTC hour < 6, Tempo Low-cost HC). The paid charging is capped per
+    UTC day at the capacity the day's surplus solar will not fill
+    (`capacity - day_surplus`), so the sun always gets the first word: grid
+    kWh are bought only when the day cannot fill the battery for free.
+    Discharge serves High-cost (HP) hours only, so stored kWh displace the
+    costlier period instead of being burned on cheap HC draw.
+
+    Each kWh *stored* costs `efficiency`-inverted kWh drawn from the grid
+    (returned in `grid_draw_added`, billed at the night register). Returns
+    the final per-hour grid draw, the paid kWh, and the cycling usage.
+    """
+    n = len(imp)
+    soc = 0.0
+    final = [0.0] * n
+    grid_draw_added = [0.0] * n
+    total_charge = 0.0
+    total_discharge = 0.0
+    total_grid = 0.0
+    day_charged = 0.0
+    day_grid = 0.0
+    last_day = None
+    day_cap = (None if max_daily_cycles is None
+               else max_daily_cycles * capacity)
+
+    for i in range(n):
+        day = i // 24
+        if day != last_day:
+            last_day = day
+            day_charged = 0.0
+            day_grid = 0.0
+        if pool[i] > 0.0 and soc < capacity:
+            stored = min(pool[i] * efficiency, max_charge, capacity - soc)
+            if day_cap is not None:
+                stored = max(0.0, min(stored, day_cap - day_charged))
+            soc += stored
+            day_charged += stored
+            total_charge += stored
+            final[i] = imp[i]
+        elif (i % 24 < 6 and soc < capacity
+              and capacity - day_surplus[day] - day_grid > 0):
+            stored = min(max_charge, capacity - soc,
+                         capacity - day_surplus[day] - day_grid)
+            if day_cap is not None:
+                stored = max(0.0, min(stored, day_cap - day_charged))
+            if stored > 0.0:
+                soc += stored
+                grid_draw_added[i] = stored / efficiency
+                day_charged += stored
+                day_grid += stored
+                total_charge += stored
+                total_grid += stored
+            final[i] = imp[i]
+        else:
+            draw = imp[i]
+            if draw > 0.0 and soc > 0.0 and hour_period[i] == "hp":
+                dch = min(draw, max_discharge, soc)
+                soc -= dch
+                draw -= dch
+                total_discharge += dch
+            final[i] = draw
+
+    return {
+        "grid_in_kwh": final,
+        "grid_draw_added_kwh": grid_draw_added,
+        "total_charged_kwh": total_charge,
+        "total_grid_stored_kwh": total_grid,
+        "total_discharged_kwh": total_discharge,
+        "cycles_used": (total_charge / capacity if capacity else 0.0),
+    }
+
+
 def register_reduction(baseline_reg: dict[str, float],
                        reduction_hour: list[float], hour_reg: list[str],
                        hour_present: list[bool]) -> dict[str, float]:
@@ -281,6 +361,9 @@ def main() -> int:
     threshold = float(scfg.get(
         "marginal_saving_threshold_eur_per_kwh", 0.30))
     ref_contract = scfg.get("marginal_reference_contract", "best")
+    night_cfg = scfg.get("night_grid_charge", {})
+    night_enabled = bool(night_cfg.get("enabled", False))
+    night_capacities = [float(c) for c in night_cfg.get("capacities_kwh", [])]
     be = scfg.get("break_even", {})
     be_min = float(be.get("k_min", 1.0))
     be_max = float(be.get("k_max", 4.0))
@@ -380,6 +463,89 @@ def main() -> int:
                     "contracts": contracts,
                 })
 
+        night_batteries = []
+        if night_enabled and night_capacities:
+            hour_period = ["hp" if r.endswith("_hp") else "hc"
+                           for r in hour_reg]
+            n_days = n_hours // 24
+            day_surplus = [sum(pool[d * 24:(d + 1) * 24])
+                           for d in range(n_days)]
+            for cap in [0.0] + night_capacities:
+                night = {
+                    "capacity_kwh": cap,
+                    "auto_consumption_pct": round(auto / solar * 100, 2)
+                    if solar else None,
+                    "auto_consumption_gain_pp": 0.0,
+                    "grid_in_kwh": round(gi, 2),
+                    "grid_in_reduction_kwh": 0.0,
+                    "grid_in_reduction_pct": 0.0,
+                    "grid_charged_kwh": 0.0,
+                    "grid_charged_stored_kwh": 0.0,
+                    "total_discharged_kwh": 0.0,
+                    "total_charged_kwh": 0.0,
+                    "cycles_used": 0.0,
+                    "contracts": {n: {
+                        "cost": priced[n]["cost"],
+                        "saving_vs_no_battery_eur": 0.0,
+                        "saving_vs_baseline_eur": round(
+                            baseline_priced[n]["cost"] - priced[n]["cost"], 2)}
+                        for n in priced},
+                }
+                if cap > 0.0:
+                    sim = simulate_battery_night(
+                        imp, pool, day_surplus, hour_period, cap, efficiency,
+                        max_charge, max_discharge, max_daily_cycles)
+                    gi_night = sum_present(sim["grid_in_kwh"])
+                    red_kwh = gi - gi_night
+                    red_pct = red_kwh / gi * 100 if gi else None
+                    grid_drawn = sum_present(sim["grid_draw_added_kwh"])
+                    auto_bat = auto + sim["total_discharged_kwh"]
+                    auto_pct = (auto_bat / solar * 100 if solar else None)
+                    auto_pct_no_bat = (auto / solar * 100 if solar else None)
+                    grid_reduction_hour = [
+                        scaled["grid_in_reduction_kwh"][i]
+                        + (imp[i] - sim["grid_in_kwh"][i])
+                        for i in range(n_hours)]
+                    regs_night = register_reduction(
+                        base_regs, grid_reduction_hour, hour_reg, hour_present)
+                    added: dict[str, float] = {r: 0.0
+                                               for r in vmlib.TEMPO_METRIC_KEYS}
+                    for i, reg in enumerate(hour_reg):
+                        if hour_present[i]:
+                            added[reg] += sim["grid_draw_added_kwh"][i]
+                    regs_night = {r: max(0.0, regs_night[r] + added[r])
+                                  for r in vmlib.TEMPO_METRIC_KEYS}
+                    priced_night, _ = price_all(tariffs, regs_night)
+                    contracts = {}
+                    for name, bcost in priced.items():
+                        saving = bcost["cost"] - priced_night[name]["cost"]
+                        contracts[name] = {
+                            "cost": priced_night[name]["cost"],
+                            "saving_vs_no_battery_eur": round(saving, 2),
+                            "saving_vs_baseline_eur": round(
+                                baseline_priced[name]["cost"]
+                                - priced_night[name]["cost"], 2),
+                        }
+                    night.update({
+                        "auto_consumption_pct": round(auto_pct, 2),
+                        "auto_consumption_gain_pp": round(
+                            auto_pct - auto_pct_no_bat, 2),
+                        "grid_in_kwh": round(gi_night, 2),
+                        "grid_in_reduction_kwh": round(red_kwh, 2),
+                        "grid_in_reduction_pct": round(red_pct, 2)
+                        if red_pct is not None else None,
+                        "grid_charged_kwh": round(grid_drawn, 2),
+                        "grid_charged_stored_kwh": round(
+                            sim["total_grid_stored_kwh"], 2),
+                        "total_discharged_kwh": round(
+                            sim["total_discharged_kwh"], 2),
+                        "total_charged_kwh": round(
+                            sim["total_charged_kwh"], 2),
+                        "cycles_used": round(sim["cycles_used"], 1),
+                        "contracts": contracts,
+                    })
+                night_batteries.append(night)
+
         scaling_out.append({
             "k": k,
             "solar_total_kwh": round(solar, 2),
@@ -398,6 +564,7 @@ def main() -> int:
             "cheapest_contract": cheapest,
             "tempo_optimal": tempo_optimal,
             "batteries": batteries,
+            "night_charge_batteries": night_batteries,
         })
 
     # ---- break-even scan: where does Tempo stop being the cheapest? ------
@@ -531,6 +698,15 @@ def main() -> int:
                       f"({b['grid_in_reduction_pct']:.1f} %) "
                       f"tempo saving {tempo_saving:7.2f} EUR "
                       f"({b['cycles_used']:.1f} cycles)")
+        if s["night_charge_batteries"]:
+            print("  night grid charge (+Tempo HC arbitrage):")
+            for b in s["night_charge_batteries"]:
+                tempo_saving = b["contracts"]["tempo"]["saving_vs_baseline_eur"]
+                print(f"    battery {b['capacity_kwh']:>5.1f} kWh: "
+                      f"grid bought {b['grid_charged_kwh']:7.1f} kWh, "
+                      f"gridIn -{b['grid_in_reduction_kwh']:7.1f} kWh, "
+                      f"tempo saving {tempo_saving:7.2f} EUR "
+                      f"({b['cycles_used']:.1f} cycles)")
 
     print(f"\nBreak-even (Tempo stops being optimal):")
     print(f"{'k':>5} {'cheapest':>13} {'tempo EUR':>9} {'best EUR':>9}")
@@ -583,6 +759,10 @@ def main() -> int:
             "max_charge_power_kw": max_charge,
             "max_discharge_power_kw": max_discharge,
             "max_daily_cycles": max_daily_cycles,
+        },
+        "night_grid_charge": {
+            "enabled": night_enabled,
+            "capacities_kwh": [round(c, 2) for c in night_capacities],
         },
         "marginal_saving_threshold_eur_per_kwh": threshold,
         "marginal_reference_contract": ref_contract,

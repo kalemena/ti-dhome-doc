@@ -356,3 +356,14 @@ solar_scenarios:
     sizing_max_kwh: 30.0
   marginal_saving_threshold_eur_per_kwh: 0.30
   marginal_reference_contract: best
+  # Night grid charging variant (`solar_scenarios[i].night_charge_batteries`):
+  # the battery may also buy energy from the grid during the night (Tempo
+  # Low-cost HC hours, before sunrise) to cover the day's High-cost (HP)
+  # consumption. The "clever" rule keeps paid charging subordinate to free
+  # solar: per UTC day, grid charging is capped at the capacity the day's
+  # surplus solar will NOT fill (`capacity - day_surplus`), so the battery
+  # never pays for kWh the sun could provide. Charging is billed at the
+  # Tempo HC rate of the night's color; discharge serves HP hours only.
+  night_grid_charge:
+    enabled: true
+    capacities_kwh: [4, 8, 16]
