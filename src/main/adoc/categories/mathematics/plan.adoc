@@ -250,10 +250,6 @@ reported as PASS/FAIL with delta.
 * Surplus balance: Solar - Grid In per hour.
 * Provide seasonal highlights by splitting into 4 seasons measure comparing metrics fro grid in/out and solr production
 
-This supersedes functionally `mathematics-solar.py` (kept as legacy, see
-below) and extends it from 3 metrics to the full
-solar/teleinfo/zigbee set.
-
 *Source:* `hourly-energy.csv`.
 
 *Output:* `scripts/output/hourly-profile.csv` (24 lines) + optional Grafana-ready table.
@@ -388,7 +384,6 @@ Conventions followed (from the other categories):
 * Outputs: `scripts/output/hourly-energy.csv`, `facts.csv`,
   `contracts.json`, `hourly-profile.csv`, `scenarios.json`,
   `solar-scenarios.json`, `battery-sizing.csv`
-* `mathematics-solar.py` kept as legacy (not removed, superseded by 05)
 
 == Acceptance criteria
 

@@ -27,9 +27,6 @@ same solar / grid-in / grid-out / auto-consumed / home-consumption metrics are
 computed per season to compare where grid draw and solar production sit over
 the year.
 
-This supersedes functionally the legacy `mathematics-solar.py` (kept in the
-category) and extends it from 3 metrics to the full solar/teleinfo/zigbee set.
-
 Output:
   * `hourly-profile.csv`  the 24-hour-of-day profile (24 rows + header);
   * `hourly-profile.json` the structured result (24-hour profile + totals +

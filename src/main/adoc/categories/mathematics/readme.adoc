@@ -5,15 +5,16 @@
 ====
 Pre-requisits for Mathematics:
 
-- Database with enough data points: Prometheus
+- Database with enough data points: Prometheus or Victoria Metrics
+- Scripting to export datasets in hourly aggregates allowing computations
 - (optional) Graphic Interface to visualize queries: Grafana
 ====
 
 == Scripts and reproducibility
 
-The queries below are implemented, scripted and reproducible in the
-`scripts/` directory of this category (the phase plan is documented in
-`plan.adoc`). A Makefile at the category root drives every step:
+The queries below are implemented, scripted and reproducible in the `scripts/` directory.
+
+Makefile drives every step:
 
 * `make setup` - create the venv and install `requirements.txt` (once);
 * `make data-quality` - Phase 0 checks: identity Grid In vs Tempo, solar
