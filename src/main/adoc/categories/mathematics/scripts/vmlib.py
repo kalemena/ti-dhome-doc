@@ -68,14 +68,17 @@ def _require_deps() -> None:
 # --------------------------------------------------------------------------
 
 def load_config(path: str | None) -> dict:
-    """Load energy-config.yaml (PyYAML). Raises if unreadable.
+    """Load energy-config.yaml (PyYAML). Raises if unreadable or missing.
 
-    Passing None returns an empty dict; the reference structure lives in the
-    file under `scripts/energy-config.yaml`.
+    The config file is mandatory: callers pass the path to
+    scripts/energy-config.yaml.
     """
     _require_deps()
     if not path:
-        return {}
+        raise ValueError("a config file is required (--config "
+                         "path/to/energy-config.yaml)")
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"config file not found: {path}")
     with open(path) as f:
         return yaml.safe_load(f)
 

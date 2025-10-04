@@ -45,7 +45,8 @@ setup: venv
 data-quality:
 	$(PYTHON_BIN) $(SCRIPT_DIR)/01-data-quality.py $(DX_ARGS) \
 		--config $(SCRIPT_DIR)/energy-config.yaml \
-		--output $(SCRIPT_DIR)/output/data-quality.json
+		--output $(SCRIPT_DIR)/output/data-quality.json \
+		--html $(SCRIPT_DIR)/output/data-quality.html
 
 solar:
 	$(PYTHON_BIN) $(SCRIPT_DIR)/01-data-quality.py $(DX_ARGS) \
@@ -63,12 +64,6 @@ correct-solar:
 	$(PYTHON_BIN) $(SCRIPT_DIR)/01-data-quality.py $(DX_ARGS) \
 		--config $(SCRIPT_DIR)/energy-config.yaml \
 		--correct-solar $(SCRIPT_DIR)/output/solar-corrected
-
-report-html:
-	$(PYTHON_BIN) $(SCRIPT_DIR)/01-data-quality.py $(DX_ARGS) \
-		--config $(SCRIPT_DIR)/energy-config.yaml \
-		--output $(SCRIPT_DIR)/output/data-quality.json \
-		--html $(SCRIPT_DIR)/output/data-quality.html
 
 ###########################
 # Analysis phases (2..7)

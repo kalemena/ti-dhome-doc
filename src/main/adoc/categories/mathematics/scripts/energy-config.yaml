@@ -73,6 +73,21 @@ metrics:
     selector: 'sensors_teleinfo_BBRHPJR{location="main"}'
     unit: Wh
     scale_to_kwh: 0.001
+  electric_car:
+    description: Electric car consumption (garage power meter, phase 1)
+    selector: 'sensors_zigbee_power_l1{location="C01~Garage~PowerMeter"}'
+    unit: W
+    scale_to_kwh: 1.0
+  water_heater:
+    description: Water heater consumption (garage power meter, phase 2)
+    selector: 'sensors_zigbee_power_l2{location="C01~Garage~PowerMeter"}'
+    unit: W
+    scale_to_kwh: 1.0
+  heaters:
+    description: Heaters consumption (garage power meter, phase 3)
+    selector: 'sensors_zigbee_power_l3{location="C01~Garage~PowerMeter"}'
+    unit: W
+    scale_to_kwh: 1.0
 
 # Energy tariffs (EUR/kWh, contract formulas from readme.adoc "Costs of Energy"):
 #   base         single fixed rate all year            (kWhBase)

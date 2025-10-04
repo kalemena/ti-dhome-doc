@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-VictoriaMetrics data-quality report for the mathematics/energy analysis
-(Phase 0 discovery).
+VictoriaMetrics data-quality report for the mathematics/energy analysis.
 
 Reproduces, as reusable functions, the probes executed against the live VM:
   1. per-day max_over_time sampling of cumulative counters over a 1-year window,
@@ -47,102 +46,6 @@ try:
 except ImportError:
     HAVE_YAML = False
 
-DEFAULT_CONFIG = {
-    "vm": {"url": "http://localhost:8428"},
-    "metrics": {
-        "solar_total": {
-            "selector": 'opendtu_YieldTotal{type="AC"}',
-            "scale_to_kwh": 1.0,
-        },
-        "solar_dc0": {
-            "selector": 'opendtu_YieldTotal{type="DC",channel="0"}',
-            "scale_to_kwh": 1.0,
-        },
-        "solar_dc1": {
-            "selector": 'opendtu_YieldTotal{type="DC",channel="1"}',
-            "scale_to_kwh": 1.0,
-        },
-        "grid_in": {
-            "selector": 'sensors_zigbee_energy_b{location="C03~Garage~PowerMeter"}',
-            "scale_to_kwh": 1.0,
-        },
-        "grid_out": {
-            "selector": 'sensors_zigbee_energy_produced_b{location="C03~Garage~PowerMeter"}',
-            "scale_to_kwh": 1.0,
-        },
-        "tempo_blue_hc": {
-            "selector": 'sensors_teleinfo_BBRHCJB{location="main"}',
-            "scale_to_kwh": 0.001,
-        },
-        "tempo_blue_hp": {
-            "selector": 'sensors_teleinfo_BBRHPJB{location="main"}',
-            "scale_to_kwh": 0.001,
-        },
-        "tempo_white_hc": {
-            "selector": 'sensors_teleinfo_BBRHCJW{location="main"}',
-            "scale_to_kwh": 0.001,
-        },
-        "tempo_white_hp": {
-            "selector": 'sensors_teleinfo_BBRHPJW{location="main"}',
-            "scale_to_kwh": 0.001,
-        },
-        "tempo_red_hc": {
-            "selector": 'sensors_teleinfo_BBRHCJR{location="main"}',
-            "scale_to_kwh": 0.001,
-        },
-        "tempo_red_hp": {
-            "selector": 'sensors_teleinfo_BBRHPJR{location="main"}',
-            "scale_to_kwh": 0.001,
-        },
-    },
-    "window": {"start": "2025-09-01T00:00:00Z", "end": "2026-09-01T00:00:00Z"},
-    "hourly_quality": {
-        # 1 kW panels: an hourly kWh increment above this + tolerance is
-        # physically impossible (counter jump / data corruption).
-        "solar_max_kwh_per_hour": 1.0,
-        "solar_max_tolerance_kwh": 0.15,
-        # UTC hour-of-day range (start inclusive, end exclusive) where a
-        # missing sample is relevant for solar: outside it the silence is
-        # expected (opendtu does not sample at night).
-        "solar_daylight_hours": [4, 20],
-    },
-    "known_anomalies": {
-        "solar_flat_day": ["2026-05-24"],
-        # Gaps identified during the hourly discovery probe (window
-        # 2025-09-01 -> 2026-09-01); recorded so the check stays green while
-        # the report still surfaces them.
-        "grid_missing_hour": [
-            "2025-10-12 05:00", "2025-10-12 06:00",
-            "2025-10-12 07:00", "2025-10-12 08:00", "2025-10-12 09:00",
-        ],
-        "solar_missing_hour": [
-            "2025-09-07 09:00", "2025-09-24 19:00", "2025-09-25 04:00",
-            "2025-09-25 05:00", "2025-09-25 06:00", "2025-10-04 04:00",
-            "2025-10-04 05:00", "2025-10-04 06:00", "2025-10-23 04:00",
-            "2025-10-23 05:00", "2025-10-23 06:00", "2026-04-25 13:00",
-            "2026-06-29 07:00", "2026-06-29 08:00", "2026-06-29 09:00",
-            "2026-07-01 11:00", "2026-07-23 08:00", "2026-07-23 09:00",
-            "2026-07-23 10:00", "2026-07-23 11:00", "2026-07-23 12:00",
-            "2026-07-23 13:00", "2026-07-23 14:00", "2026-07-23 15:00",
-            "2026-07-23 16:00",
-        ],
-        "solar_over_max_hour": [
-            "2026-03-14 13:00", "2026-03-16 18:00", "2026-03-17 16:00",
-            "2026-04-25 14:00", "2026-05-25 10:00", "2026-05-25 13:00",
-            "2026-06-13 13:00", "2026-06-21 14:00", "2026-07-08 13:00",
-            "2026-07-10 13:00", "2026-07-10 15:00", "2026-07-11 13:00",
-            "2026-07-23 17:00", "2026-07-29 11:00", "2026-07-29 13:00",
-            "2026-07-29 15:00", "2026-07-30 19:00", "2026-08-03 13:00",
-        ],
-        # Teleinfo hourly gaps (stream down for all counters) and per-counter
-        # holes were *identified* but not recorded as known: they are real
-        # collection outages, not the expected inactive-color silence, and
-        # should be reviewed / fixed. Fill these lists to acknowledge them:
-        #   teleinfo_stream_gap_hour: [...]
-        #   teleinfo_counter_gap_hour: {tempo_blue_hc: [...], ...}
-    },
-}
-
 TEMPO_KEYS = [
     "tempo_blue_hc", "tempo_blue_hp",
     "tempo_white_hc", "tempo_white_hp",
@@ -151,17 +54,18 @@ TEMPO_KEYS = [
 
 
 def load_config(path: str | None) -> dict:
-    if path and HAVE_YAML and os.path.exists(path):
-        with open(path) as f:
-            cfg = yaml.safe_load(f)
-        print(f"Loaded config: {path}")
-        return cfg
-    if path and not HAVE_YAML:
-        print("WARNING: PyYAML not available, using embedded default config "
-              f"(file {path} ignored). Run `make setup` to install deps.")
-    else:
-        print("No config file provided, using embedded default config.")
-    return dict(DEFAULT_CONFIG)
+    if not path:
+        raise SystemExit("ERROR: a config file is required "
+                         "(use --config path/to/energy-config.yaml)")
+    if not HAVE_YAML:
+        raise SystemExit("ERROR: PyYAML is required to read the config file. "
+                         "Run `make setup` to install deps.")
+    if not os.path.exists(path):
+        raise SystemExit(f"ERROR: config file not found: {path}")
+    with open(path) as f:
+        cfg = yaml.safe_load(f)
+    print(f"Loaded config: {path}")
+    return cfg
 
 
 def parse_ts(value) -> datetime.datetime:
@@ -446,8 +350,7 @@ def hourly_check(url: str, cfg: dict, start: datetime.datetime,
     report still lists them.
     """
     metrics = cfg["metrics"]
-    hq = {**DEFAULT_CONFIG["hourly_quality"],
-          **cfg.get("hourly_quality", {})}
+    hq = cfg["hourly_quality"]
     solar_max = hq["solar_max_kwh_per_hour"]
     solar_tol = hq["solar_max_tolerance_kwh"]
     dl_start, dl_end = hq["solar_daylight_hours"]
@@ -633,8 +536,7 @@ def correct_solar(url: str, cfg: dict, start: datetime.datetime,
     (raw vs corrected vs confidence per hour).
     """
     metrics = cfg["metrics"]
-    hq = {**DEFAULT_CONFIG["hourly_quality"],
-          **cfg.get("hourly_quality", {})}
+    hq = cfg["hourly_quality"]
     solar_max = hq["solar_max_kwh_per_hour"]
     solar_tol = hq["solar_max_tolerance_kwh"]
     over_max = solar_max + solar_tol
