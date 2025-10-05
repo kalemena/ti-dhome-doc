@@ -905,89 +905,232 @@ def render_html(report: dict, path: str, threshold_pct: float) -> None:
             for r in data)
         return f"<table><thead><tr>{h}</tr></thead><tbody>{body}</tbody></table>"
 
+    def collapsed(summary, content):
+        return (f"<details><summary>{e(summary)}</summary>"
+                f"{content}</details>")
+
+    def kpi(label, value, sub, cls="card"):
+        return (f"<div class='{cls}'><div class='kpi-label'>{e(label)}</div>"
+                f"<div class='kpi-value'>{e(value)}</div>"
+                f"<div class='kpi-sub'>{e(sub)}</div></div>")
+
+    def bars(pairs, unit=""):
+        """Horizontal bar chart; pairs = [(label, value), ...]."""
+        maxv = max((abs(v) for _, v in pairs), default=0.0) or 1.0
+        out = ['<div class="bars">']
+        for label, v in pairs:
+            pct = abs(v) / maxv * 100
+            fill = "bar-fill neg" if v < 0 else "bar-fill"
+            out.append(
+                f'<div class="bar-row">'
+                f'<span class="bar-label">{e(label)}</span>'
+                f'<div class="bar-track"><div class="{fill}" '
+                f'style="width:{pct:.1f}%"></div></div>'
+                f'<span class="bar-value">{v:.2f} {unit}</span>'
+                f'</div>')
+        out.append('</div>')
+        return "".join(out)
+
+    def progress(pct: float) -> str:
+        p = min(max(pct, 0.0), 100.0)
+        cls = "progress-fill"
+        if p < 70:
+            cls += " bad"
+        elif p < 90:
+            cls += " warn"
+        return (f'<div class="progress"><div class="{cls}" '
+                f'style="width:{p:.1f}%"></div></div>')
+
     if "identity" in report:
         id_ = report["identity"]
-        rows.append(f"<h2>Identity: Grid In vs Tempo</h2>")
-        rows.append(table(["Metric", "kWh"], [
-            ["Grid In total", id_["grid_in_total_kwh"]],
-            ["Tempo sum (any subset)", id_["tempo_sum_total_kwh"]],
-            ["Diff", f"{id_['diff_kwh']:+} ({id_['diff_pct']:+}%)"],
-        ]))
+        diff_ok = (id_["diff_pct"] is None
+                   or abs(id_["diff_pct"]) <= threshold_pct * 100)
+        rows.append('<div class="cards">' + "".join([
+            kpi("Grid In", f"{id_['grid_in_total_kwh']:.2f} kWh", "year total"),
+            kpi("Sum Tempo", f"{id_['tempo_sum_total_kwh']:.2f} kWh",
+                "any counters subset"),
+            kpi("Diff", f"{id_['diff_kwh']:+.2f} kWh",
+                f"{id_['diff_pct']:+.2f} %",
+                "card ok" if diff_ok else "card bad"),
+        ]) + '</div>')
+        rows.append("<h2>Identity: Grid In vs Sum(Tempo)</h2>")
+        rows.append(bars([
+            ("Grid In", id_["grid_in_total_kwh"]),
+            ("Sum Tempo", id_["tempo_sum_total_kwh"]),
+        ], "kWh"))
         rows.append("<h3>Monthly grid / tempo (kWh)</h3>")
-        rows.append(table(["Month", "Grid", "Tempo", "Diff"],
-                          [[mo, g, s, round(g - s, 2)]
-                           for mo, (g, s) in id_["monthly"].items()]))
-        rows.append(f"<p>Incomplete days: {len(id_['incomplete_days'])} &nbsp; "
-                    f"Diverging ({threshold_pct}%) days: "
-                    f"{len(id_['diverging_days'])}</p>")
+        pairs = []
+        for mo, (g, s) in id_["monthly"].items():
+            pairs.append((f"{mo} grid", g))
+            pairs.append((f"{mo} tempo", s))
+        rows.append(bars(pairs, "kWh"))
         miss = report["missing"]
-        rows.append("<h3>Silent days per tempo counter</h3>")
-        rows.append(table(["Counter", "Silent days"], miss["silent_days_per_counter"].items()))
+        rows.append(collapsed(
+            f"Incomplete days ({len(id_['incomplete_days'])})",
+            table(["Date", "Grid kWh", "Missing counters"],
+                  [[d["date"], d["grid_kwh"], ", ".join(d["missing"])]
+                   for d in id_["incomplete_days"]])))
+        rows.append(collapsed(
+            f"Diverging days ({len(id_['diverging_days'])} "
+            f"> {threshold_pct:.0%} deviation)",
+            table(["Date", "Grid kWh", "Tempo kWh"],
+                  [[d["date"], d["grid_kwh"], d["tempo_kwh"]]
+                   for d in id_["diverging_days"]])))
+        rows.append(collapsed(
+            "Silent days per tempo counter",
+            table(["Counter", "Silent days"],
+                  sorted(miss["silent_days_per_counter"].items()))))
+        rows.append(collapsed(
+            "Deficit kWh by silent-counter combination",
+            table(["Silent combination", "Deficit kWh"],
+                  miss["deficit_by_missing"].items())))
 
     if "solar" in report:
         s = report["solar"]
+        auto = round(s["solar_total_kwh"] - s["grid_out_total_kwh"], 2)
+        rows.append('<div class="cards">' + "".join([
+            kpi("Solar AC", f"{s['solar_total_kwh']:.2f} kWh", "produced"),
+            kpi("Grid Out", f"{s['grid_out_total_kwh']:.2f} kWh", "exported"),
+            kpi("Auto-consumed", f"{auto:.2f} kWh", "solar - export"),
+            kpi("AC vs DC sum", f"{s['ac_vs_dc_sum_diff_kwh']:+.2f} kWh",
+                "consistency",
+                "card ok" if s["ok"] else "card bad"),
+        ]) + '</div>')
         rows.append("<h2>Solar consistency</h2>")
-        rows.append(table(["Metric", "kWh"], [
-            ["Solar AC", s["solar_total_kwh"]],
-            ["Solar DC0", s["solar_dc0_kwh"]],
-            ["Solar DC1", s["solar_dc1_kwh"]],
-            ["AC - (DC0+DC1)", s["ac_vs_dc_sum_diff_kwh"]],
-            ["Grid Out", s["grid_out_total_kwh"]],
-        ]))
-        rows.append("<p>Missing days: {} &nbsp; Resets: {} &nbsp; Flat days: "
-                    "{} &nbsp; Export&gt;production: {} &nbsp; Unknown "
-                    "anomalies: {}</p>".format(
-                        len(s["missing_days"]), len(s["negative_days"]),
-                        len(s["flat_days"]),
-                        len(s["export_exceeds_production_days"]),
-                        len(s["unknown_anomaly_days"])))
+        rows.append(bars([
+            ("Solar AC", s["solar_total_kwh"]),
+            ("Solar DC0", s["solar_dc0_kwh"]),
+            ("Solar DC1", s["solar_dc1_kwh"]),
+            ("Grid Out", s["grid_out_total_kwh"]),
+            ("Auto-consumed", auto),
+        ], "kWh"))
         rows.append("<h3>Monthly solar / export / auto-consumed (kWh)</h3>")
-        rows.append(table(["Month", "Solar", "Grid Out", "Auto-consumed"],
-                          [[mo, a, o, round(a - o, 2)]
-                           for mo, (a, o) in s["monthly"].items()]))
+        pairs = []
+        for mo, (a, o) in s["monthly"].items():
+            pairs.append((f"{mo} solar", a))
+            pairs.append((f"{mo} export", o))
+        rows.append(bars(pairs, "kWh"))
+        anomal = []
+        for d in s["missing_days"]:
+            anomal.append([d, "missing", "", ""])
+        for d in s["negative_days"]:
+            anomal.append([d["date"], "negative delta", f"{d['delta_kwh']:.3f}", ""])
+        for d in s["flat_days"]:
+            anomal.append([d, "flat", "", ""])
+        for d in s["export_exceeds_production_days"]:
+            anomal.append([d["date"], "export > production",
+                           d["solar_kwh"], d["export_kwh"]])
+        rows.append(collapsed(
+            f"Anomalies ({len(anomal)})",
+            table(["Date", "Kind", "Solar kWh", "Export kWh"], anomal)))
 
     if "coverage" in report:
         rows.append("<h2>Coverage probe</h2>")
-        rows.append(table(["Metric", "Coverage", "First", "Last"], [
-            [k, f"{v['covered_samples']}/{v['total_samples']} "
-                f"({v['coverage_pct']}%)", v["first"], v["last"]]
-            for k, v in report["coverage"].items()]))
+        rows.append('<div class="bars">')
+        for k, v in report["coverage"].items():
+            rows.append(
+                f'<div class="bar-row"><span class="bar-label">{e(k)}</span>'
+                f'<div class="bar-track">{progress(v["coverage_pct"])}</div>'
+                f'<span class="bar-value">{v["covered_samples"]}/{v["total_samples"]} '
+                f'({v["coverage_pct"]:.1f}%)</span></div>')
+        rows.append('</div>')
+        rows.append(collapsed(
+            "Sampled values (first / last)",
+            table(["Metric", "Coverage", "First", "Last"], [
+                [k, f"{v['covered_samples']}/{v['total_samples']} "
+                    f"({v['coverage_pct']}%)", v["first"], v["last"]]
+                for k, v in report["coverage"].items()])))
 
     if "hourly" in report:
         h = report["hourly"]
         rows.append("<h2>Hourly coverage</h2>")
-        rows.append(f"<p>Overall: {'PASS' if h['ok'] else 'FAIL'}</p>")
-        rows.append(table(["Metric", "Coverage", "Total kWh", "Gaps"],
-                          [[key, f"{m['coverage_pct']}%", m["total_kwh"],
-                            _hourly_gap_summary(key, m)]
-                           for key, m in h.items()
-                           if isinstance(m, dict) and "coverage_pct" in m]))
+        rows.append(f'<p class="{"ok" if h["ok"] else "bad"}">Overall: '
+                    f"{'PASS' if h['ok'] else 'FAIL'}</p>")
+        metrics = [k for k in ("grid_in", "grid_out", "solar_total",
+                               "solar_dc0", "solar_dc1", *TEMPO_KEYS)
+                   if k in h]
+        rows.append('<div class="cards">' + "".join([
+            kpi(k.replace("_", " ").title(),
+                f"{h[k]['coverage_pct']:.2f} %",
+                "PASS" if h[k]["ok"] else "FAIL",
+                "card ok" if h[k]["ok"] else "card bad")
+            for k in metrics]) + '</div>')
+        rows.append('<div class="bars">')
+        for k in metrics:
+            m = h[k]
+            rows.append(
+                f'<div class="bar-row"><span class="bar-label">{e(k)}</span>'
+                f'<div class="bar-track">{progress(m["coverage_pct"])}</div>'
+                f'<span class="bar-value">{m["coverage_pct"]:.2f}% — '
+                f'{e(_hourly_gap_summary(k, m))}</span></div>')
+        rows.append('</div>')
+        rows.append(collapsed(
+            "Per-metric detail (kWh totals, gap counts)",
+            table(["Metric", "Coverage", "Total kWh", "Gaps"],
+                  [[k, f"{h[k]['coverage_pct']:.2f}%", h[k]["total_kwh"],
+                    _hourly_gap_summary(k, h[k])] for k in metrics])))
         if "teleinfo_stream_gap" in h:
             tsg = h["teleinfo_stream_gap"]
-            rows.append(f"<h3>Teleinfo stream-gap hours ({tsg['count']})</h3>")
-            rows.append(table(["Start", "End"], tsg["windows"][:50]))
+            rows.append(collapsed(
+                f"Teleinfo stream-gap windows ({tsg['count']} hours)",
+                table(["Start", "End"], tsg["windows"])))
         for key in ("solar_total", "solar_dc0", "solar_dc1"):
             m = h.get(key)
             if m and m["over_max_hours"]:
-                rows.append("<h3>Solar hourly increments beyond the "
-                            f"{m['solar_max_kwh_per_hour']} kWh/h physical cap"
-                            "</h3>")
-                rows.append(table(["UTC", "kWh"], [[o["utc"], o["kwh"]]
-                                                   for o in m["over_max_hours"]]))
+                rows.append(collapsed(
+                    f"{key}: hourly increments beyond the "
+                    f"{m['solar_max_kwh_per_hour']} kWh/h physical cap "
+                    f"({len(m['over_max_hours'])})",
+                    table(["UTC", "kWh"], [[o["utc"], f"{o['kwh']:.3f}"]
+                                           for o in m["over_max_hours"]])))
 
     w = report["window"]
+    css = """
+ body { font-family: -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+        margin: 2rem; color: #222; background: #fafafa; }
+ h1 { border-bottom: 2px solid #333; padding-bottom: .3rem; }
+ h2 { margin-top: 2rem; border-bottom: 1px solid #ccc; padding-bottom: .2rem; }
+ h3 { margin-top: 1.2rem; }
+ .cards { display: flex; flex-wrap: wrap; gap: .8rem; margin: 1rem 0; }
+ .card { flex: 1 1 160px; background: #fff; border: 1px solid #ddd;
+         border-left: 5px solid #4a90d9; border-radius: 6px; padding: .6rem .9rem;
+         box-shadow: 0 1px 2px rgba(0,0,0,.05); }
+ .card.ok { border-left-color: #2e9e5b; }
+ .card.bad { border-left-color: #d64545; }
+ .kpi-label { font-size: .7rem; text-transform: uppercase; letter-spacing: .04em;
+              color: #666; }
+ .kpi-value { font-size: 1.3rem; font-weight: 600; margin: .15rem 0; }
+ .kpi-sub { font-size: .8rem; color: #888; }
+ .bars { margin: .4rem 0 1rem; }
+ .bar-row { display: flex; align-items: center; gap: .6rem; margin: .3rem 0; }
+ .bar-label { flex: 0 0 230px; text-align: right; font-size: .8rem; color: #444;
+              white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+ .bar-track { flex: 1; background: #eee; border-radius: 4px; height: 16px;
+              overflow: hidden; }
+ .bar-fill { height: 100%; background: linear-gradient(90deg, #4a90d9, #6fb1e8); }
+ .bar-fill.neg { background: linear-gradient(90deg, #d64545, #e88f6f); }
+ .bar-value { flex: 0 0 160px; font-size: .8rem; color: #222; }
+ .progress { flex: 1; background: #eee; border-radius: 4px; height: 16px;
+             overflow: hidden; }
+ .progress-fill { height: 100%; background: linear-gradient(90deg, #2e9e5b, #67c98c); }
+ .progress-fill.warn { background: linear-gradient(90deg, #d99a2b, #ecc06f); }
+ .progress-fill.bad { background: linear-gradient(90deg, #d64545, #e88f6f); }
+ details { margin: .6rem 0; background: #fff; border: 1px solid #ddd;
+           border-radius: 6px; }
+ details summary { cursor: pointer; padding: .5rem .8rem; font-weight: 600;
+                   color: #333; }
+ details table { margin: .2rem 1rem 1rem; }
+ p { color: #444; }
+ p.ok { color: #2e9e5b; font-weight: 600; }
+ p.bad { color: #d64545; font-weight: 600; }
+ table { border-collapse: collapse; margin: 1rem 0; width: 100%; }
+ th, td { border: 1px solid #aaa; padding: .3rem .7rem; text-align: left; }
+ th { background: #eee; }
+"""
     page = f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
 <title>{e(title)}</title>
-<style>
- body {{ font-family: sans-serif; margin: 2rem; }}
- h1 {{ border-bottom: 2px solid #333; padding-bottom: .3rem; }}
- h2 {{ margin-top: 2rem; }}
- table {{ border-collapse: collapse; margin: 1rem 0; }}
- th, td {{ border: 1px solid #aaa; padding: .3rem .7rem; text-align: left; }}
- th {{ background: #eee; }}
- p {{ color: #444; }}
-</style></head><body>
+<style>{css}</style></head><body>
 <h1>{e(title)}</h1>
 <p>VM: {e(report['url'])}<br>
 Window: {e(w['start'])} -> {e(w['end'])}<br>
