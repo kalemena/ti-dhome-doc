@@ -941,6 +941,116 @@ def render_html(report: dict, path: str, threshold_pct: float) -> None:
         return (f'<div class="progress"><div class="{cls}" '
                 f'style="width:{p:.1f}%"></div></div>')
 
+    def grouped_bars(groups):
+        """Vertical grouped bar chart; groups = [(x_label, [(bar, value)]), ...]."""
+        maxv = max((abs(v) for _, bs in groups for _, v in bs),
+                   default=0.0) or 1.0
+        classes = {name for _, bs in groups for name, _ in bs}
+        out = ['<div class="chart">']
+        out.append('<div class="chart-groups">')
+        for x, bs in groups:
+            out.append('<div class="chart-group">')
+            out.append('<div class="chart-bars">')
+            for label, v in bs:
+                h = abs(v) / maxv * 100
+                out.append(
+                    f'<div class="chart-bar {e(label)}" '
+                    f'style="height:{h:.1f}%" '
+                    f'title="{e(label)}: {v:.2f} kWh">'
+                    f'<span>{v:.0f}</span></div>')
+            out.append('</div>')
+            out.append(f'<div class="chart-month">{e(x)}</div>')
+            out.append('</div>')
+        out.append('</div>')
+        legend = "".join(
+            f'<span><i class="dot {e(name)}"></i>{e(name)}</span>'
+            for name in sorted(classes))
+        out.append(f'<div class="chart-legend">{legend}</div>')
+        out.append('</div>')
+        return "".join(out)
+
+    def line_chart(x_labels, series, tooltip_series=None, width=620,
+                   height=220):
+        """SVG line chart; series = [(name, color, [values]), ...] aligned to
+        x_labels. Negative values plot below the zero baseline.
+
+        tooltip_series = [(name, color, [values]), ...] supplies extra series
+        that are NOT drawn but are shown in the per-month hover tooltip.
+        """
+        drawn = list(series)
+        tips = (drawn
+                + [(n, c, vs) for n, c, vs in (tooltip_series or [])])
+        vals = [v for _, _, vs in drawn for v in vs]
+        ymin = min([0.0] + vals)
+        ymax = max([0.0] + vals)
+        if ymax - ymin < 1e-9:
+            ymax = ymin + 1.0
+        pl, pr, pt, pb = 34, 10, 10, 24
+        pw = width - pl - pr
+        ph = height - pt - pb
+        n = len(x_labels)
+
+        def X(i):
+            return pl + (pw * i / (n - 1) if n > 1 else pw / 2)
+
+        def Y(v):
+            return pt + (ymax - v) / (ymax - ymin) * ph
+
+        svg = [f'<svg class="chart-svg" viewBox="0 0 {width} {height}">']
+        for k in range(5):
+            v = ymin + (ymax - ymin) * k / 4
+            yy = Y(v)
+            svg.append(f'<line class="grid" x1="{pl}" y1="{yy:.1f}" '
+                       f'x2="{width - pr}" y2="{yy:.1f}"/>')
+            svg.append(f'<text class="axis" x="{pl - 5}" y="{yy + 3:.1f}" '
+                       f'text-anchor="end">{v:,.1f}</text>')
+        svg.append(f'<line class="zero" x1="{pl}" y1="{Y(0):.1f}" '
+                   f'x2="{width - pr}" y2="{Y(0):.1f}"/>')
+        for name, color, vs in drawn:
+            pts = " ".join(f"{X(i):.1f},{Y(v):.1f}"
+                           for i, v in enumerate(vs))
+            svg.append(f'<polyline fill="none" stroke="{color}" '
+                       f'stroke-width="2" stroke-linejoin="round" '
+                       f'points="{pts}"/>')
+        for i, lab in enumerate(x_labels):
+            svg.append(f'<text class="axis" x="{X(i):.1f}" '
+                       f'y="{height - 8}" text-anchor="middle">'
+                       f'{e(lab)}</text>')
+        for i in range(n):
+            for name, color, vs in drawn:
+                svg.append(
+                    f'<circle cx="{X(i):.1f}" cy="{Y(vs[i]):.1f}" r="3" '
+                    f'fill="{color}" data-x="{i}"/>')
+        svg.append('</svg>')
+        legend = "".join(
+            f'<span><i class="dot" style="background:{e(color)}"></i>'
+            f'{e(name)}</span>'
+            for name, color, _ in drawn)
+        data = json.dumps({
+            "labels": x_labels,
+            "series": [{"n": n, "c": c, "v": vs} for n, c, vs in tips],
+        })
+        tip = ('<div class="chart-tip" hidden></div>'
+               '<script>(function(chart){var tip=chart.querySelector("'
+               '.chart-tip");if(!tip)return;var D=__DATA__;var cs=chart.'
+               'querySelectorAll("svg circle");function rows(x){var s=D.'
+               'series,o=[];for(var k=0;k<s.length;k++){o.push('
+               '"<span class=\'tip-d\' style=\'background:"+s[k].c+"\'></span>"'
+               '+s[k].n+"&nbsp;<b>"+s[k].v[x].toFixed(2)+" kWh</b>");}return o;}'
+               'function show(el){var x=+el.getAttribute("data-x");tip.innerHTML='
+               '"<b>"+D.labels[x]+"</b><br>"+rows(x).join("<br>");tip.hidden=false;}'
+               'function place(el,ev){var r=chart.getBoundingClientRect();'
+               'tip.style.left=(ev.clientX-r.left+14)+"px";tip.style.top='
+               '(ev.clientY-r.top-8)+"px";}for(var j=0;j<cs.length;j++){'
+               '(function(c){c.addEventListener("mouseenter",function(e){'
+               'show(c);place(c,e);});c.addEventListener("mousemove",'
+               'function(e){place(c,e);});c.addEventListener("mouseleave",'
+               'function(){tip.hidden=true;});})(cs[j]);}})(document'
+               '.currentScript.parentElement);</script>').replace(
+            "__DATA__", data)
+        return (f'<div class="chart">{"".join(svg)}'
+                f'<div class="chart-legend">{legend}</div>{tip}</div>')
+
     if "identity" in report:
         id_ = report["identity"]
         diff_ok = (id_["diff_pct"] is None
@@ -959,11 +1069,11 @@ def render_html(report: dict, path: str, threshold_pct: float) -> None:
             ("Sum Tempo", id_["tempo_sum_total_kwh"]),
         ], "kWh"))
         rows.append("<h3>Monthly grid / tempo (kWh)</h3>")
-        pairs = []
+        groups = []
         for mo, (g, s) in id_["monthly"].items():
-            pairs.append((f"{mo} grid", g))
-            pairs.append((f"{mo} tempo", s))
-        rows.append(bars(pairs, "kWh"))
+            short = datetime.datetime.strptime(mo, "%Y-%m").strftime("%b %y")
+            groups.append((short, [("grid", g), ("tempo", s)]))
+        rows.append(grouped_bars(groups))
         miss = report["missing"]
         rows.append(collapsed(
             f"Incomplete days ({len(id_['incomplete_days'])})",
@@ -1005,11 +1115,19 @@ def render_html(report: dict, path: str, threshold_pct: float) -> None:
             ("Auto-consumed", auto),
         ], "kWh"))
         rows.append("<h3>Monthly solar / export / auto-consumed (kWh)</h3>")
-        pairs = []
+        labels, solar_vals, export_vals, auto_vals = [], [], [], []
         for mo, (a, o) in s["monthly"].items():
-            pairs.append((f"{mo} solar", a))
-            pairs.append((f"{mo} export", o))
-        rows.append(bars(pairs, "kWh"))
+            labels.append(datetime.datetime.strptime(mo, "%Y-%m")
+                          .strftime("%b %y"))
+            solar_vals.append(a)
+            export_vals.append(-o)
+            auto_vals.append(a - o)
+        rows.append(line_chart(labels, [
+            ("Solar", "#e6b800", solar_vals),
+            ("Auto-consumption", "#2e9e5b", auto_vals),
+        ], tooltip_series=[
+            ("Export", "#4a90d9", export_vals),
+        ]))
         anomal = []
         for d in s["missing_days"]:
             anomal.append([d, "missing", "", ""])
@@ -1115,6 +1233,39 @@ def render_html(report: dict, path: str, threshold_pct: float) -> None:
  .progress-fill { height: 100%; background: linear-gradient(90deg, #2e9e5b, #67c98c); }
  .progress-fill.warn { background: linear-gradient(90deg, #d99a2b, #ecc06f); }
  .progress-fill.bad { background: linear-gradient(90deg, #d64545, #e88f6f); }
+ .chart { margin: .6rem 0 1rem; position: relative; }
+ .chart-tip { position: absolute; z-index: 10; pointer-events: none;
+              background: rgba(20,20,20,.92); color: #fff; border-radius: 5px;
+              padding: .4rem .55rem; font-size: .72rem; line-height: 1.4;
+              white-space: nowrap; box-shadow: 0 1px 4px rgba(0,0,0,.3); }
+ .chart-tip .tip-d { display: inline-block; width: 8px; height: 8px;
+                     border-radius: 2px; margin-right: .3rem;
+                     vertical-align: baseline; }
+ .chart-tip b { color: #fff; }
+ .chart-groups { display: flex; align-items: stretch; gap: .25rem; height: 210px; }
+ .chart-group { flex: 1 1 0; display: flex; flex-direction: column; min-width: 0; }
+ .chart-bars { flex: 1; display: flex; align-items: flex-end;
+                justify-content: center; gap: 3px; }
+ .chart-bar { position: relative; width: min(22px, 55%); display: flex;
+              align-items: flex-start; justify-content: center;
+              border-radius: 3px 3px 0 0; }
+ .chart-bar span { font-size: .65rem; font-weight: 600; color: #fff;
+                   padding-top: 2px; text-shadow: 0 0 2px rgba(0,0,0,.5); }
+ .chart-bar.grid { background: linear-gradient(180deg, #4a90d9, #2e6bb0); }
+ .chart-bar.tempo { background: linear-gradient(180deg, #e0a04e, #c07f2b); }
+ .chart-month { text-align: center; font-size: .68rem; color: #555;
+                margin-top: .25rem; white-space: nowrap; }
+ .chart-legend { display: flex; gap: 1.2rem; margin-top: .4rem;
+                 font-size: .8rem; color: #333; }
+ .chart-legend .dot { display: inline-block; width: 12px; height: 12px;
+                      border-radius: 3px; margin-right: .35rem;
+                      vertical-align: -1px; }
+ .chart-legend .dot.grid { background: #4a90d9; }
+ .chart-legend .dot.tempo { background: #e0a04e; }
+ .chart-svg { width: 100%; height: auto; max-width: 680px; }
+ .chart-svg .grid { stroke: #e4e4e4; stroke-width: 1; }
+ .chart-svg .zero { stroke: #999; stroke-width: 1; stroke-dasharray: 3 3; }
+ .chart-svg .axis { font-family: Arial, sans-serif; font-size: 9px; fill: #666; }
  details { margin: .6rem 0; background: #fff; border: 1px solid #ddd;
            border-radius: 6px; }
  details summary { cursor: pointer; padding: .5rem .8rem; font-weight: 600;
