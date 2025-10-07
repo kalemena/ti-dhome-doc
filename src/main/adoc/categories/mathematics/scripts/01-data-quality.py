@@ -1114,7 +1114,7 @@ def render_html(report: dict, path: str, threshold_pct: float) -> None:
             ("Grid Out", s["grid_out_total_kwh"]),
             ("Auto-consumed", auto),
         ], "kWh"))
-        rows.append("<h3>Monthly solar / export / auto-consumed (kWh)</h3>")
+        rows.append("<h3>Monthly solar / grid / export / auto-consumed (kWh)</h3>")
         labels, solar_vals, export_vals, auto_vals = [], [], [], []
         for mo, (a, o) in s["monthly"].items():
             labels.append(datetime.datetime.strptime(mo, "%Y-%m")
@@ -1122,12 +1122,20 @@ def render_html(report: dict, path: str, threshold_pct: float) -> None:
             solar_vals.append(a)
             export_vals.append(-o)
             auto_vals.append(a - o)
-        rows.append(line_chart(labels, [
+        series = [
             ("Solar", "#e6b800", solar_vals),
             ("Auto-consumption", "#2e9e5b", auto_vals),
-        ], tooltip_series=[
+        ]
+        tooltip_extra = [
             ("Export", "#4a90d9", export_vals),
-        ]))
+        ]
+        id_monthly = (report.get("identity") or {}).get("monthly") or {}
+        grid_vals = [id_monthly.get(mo, [None, None])[0] for mo in s["monthly"]]
+        if len(grid_vals) == len(solar_vals) \
+                and all(v is not None for v in grid_vals):
+            series.append(("Grid In", "#8e44ad", grid_vals))
+        rows.append(line_chart(labels, series,
+                               tooltip_series=tooltip_extra))
         anomal = []
         for d in s["missing_days"]:
             anomal.append([d, "missing", "", ""])
