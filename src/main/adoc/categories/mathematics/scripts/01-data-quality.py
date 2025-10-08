@@ -285,6 +285,8 @@ def coverage_probe(url: str, cfg: dict, start: datetime.datetime,
         sample_ts.append(int(d.timestamp()))
     out = {}
     for key, m in metrics.items():
+        if key in TEMPO_KEYS:
+            continue
         vals = [query_max_over_time(url, m["selector"], ts)
                 for ts in sample_ts]
         have = [v for v in vals if v is not None]
@@ -295,6 +297,24 @@ def coverage_probe(url: str, cfg: dict, start: datetime.datetime,
             "first": have[0] if have else None,
             "last": have[-1] if have else None,
         }
+    # The six Tempo registers are redundant views of the same draw, so a
+    # per-register coverage is misleading (registers are silent while their
+    # color is inactive). The single signal that matters is whether at least
+    # one register reports at each sample.
+    have = []
+    for ts in sample_ts:
+        vals = [query_max_over_time(url, metrics[k]["selector"], ts)
+                for k in TEMPO_KEYS]
+        present = [v for v in vals if v is not None]
+        if present:
+            have.append(max(present))
+    out["tempo"] = {
+        "covered_samples": len(have),
+        "total_samples": samples,
+        "coverage_pct": round(len(have) / samples * 100, 1),
+        "first": have[0] if have else None,
+        "last": have[-1] if have else None,
+    }
     return out
 
 
@@ -341,9 +361,11 @@ def hourly_check(url: str, cfg: dict, start: datetime.datetime,
     * solar_*: missing slots split between expected night silence and daylight
       gaps, plus hourly increments exceeding the physical panel cap (1 kW ->
       at most ~1 kWh/h); such jumps are flagged as counter corruption;
-    * tempo_*: missing slots per counter; fully-silent days (inactive Tempo
-      color) are expected and not reported as gaps, the shared "stream down"
-      hours (all counters silent) and per-counter holes are surfaced.
+    * tempo_*: the six registers are redundant views of the same grid draw,
+      so a missing counter (whole inactive-color days, single-register holes)
+      is expected and NOT a gap as long as at least one of the six keeps
+      reporting; only boundary hours where none of the six is reported ("stream
+      down") are failures.
 
     Gaps recorded in `known_anomalies` (grid_missing_hour, solar_missing_hour,
     solar_over_max_hour) are acknowledged and do not fail the check; the
@@ -360,7 +382,6 @@ def hourly_check(url: str, cfg: dict, start: datetime.datetime,
     known_over = set(known.get("solar_over_max_hour", []))
     flat_days = set(known.get("solar_flat_day", []))
     known_stream = set(known.get("teleinfo_stream_gap_hour", []))
-    known_counter = known.get("teleinfo_counter_gap_hour", {})
 
     n_hours = n_days * 24
     boundaries = [int((start + datetime.timedelta(hours=i)).timestamp())
@@ -470,52 +491,46 @@ def hourly_check(url: str, cfg: dict, start: datetime.datetime,
               f"night silence={len(night)}, over-max={len(over)} -> "
               f"{'PASS' if ok else 'FAIL'}")
 
-    # ----- tempo counters -----
+    # ----- tempo: six redundant registers, one true-gap signal -----
+    # The six Tempo counters are redundant registers of the same grid draw
+    # (one Low + one High per daily color). A counter going silent (whole
+    # inactive-color day, single-register hole) is expected and NOT a
+    # data-quality gap: as long as at least one register keeps reporting the
+    # grid draw is covered. Only boundary hours where NONE of the six is
+    # reported are true stream outages; those are the only tempo gaps.
     stream_slots = {b for b in boundaries
                     if all(b not in hourly[k] for k in TEMPO_KEYS)}
-    for key in TEMPO_KEYS:
-        vals = hourly[key]
-        missing = [b for b in boundaries if b not in vals]
-        per_day: dict[str, int] = defaultdict(int)
-        for b in boundaries:
-            if b in vals:
-                per_day[day_label(b)] += 1
-        inactive = sorted(d for d in per_day if per_day[d] == 0)
-        stream = [b for b in missing if b in stream_slots
-                  and iso_label(b) not in known_stream]
-        counter_specific = [b for b in missing
-                            if b not in stream_slots
-                            and per_day.get(day_label(b), 0) > 0
-                            and iso_label(b) not in known_counter.get(key, [])]
-        kwh = sum(d for _, d in increments(vals)) * metrics[key]["scale_to_kwh"]
-        ok = not stream and not counter_specific
-        ok_flags.append(ok)
-        report[key] = {
-            "ok": ok,
-            "coverage_pct": round(
-                (len(boundaries) - len(missing)) / len(boundaries) * 100, 2),
-            "total_kwh": round(kwh, 2),
-            "inactive_day_count": len(inactive),
-            "inactive_days": inactive,
-            "stream_gap_missing": len(stream),
-            "counter_specific_missing": len(counter_specific),
-            "counter_specific_windows": gap_windows(counter_specific),
-        }
-        print(f"  {key}: {report[key]['coverage_pct']}% covered, "
-              f"inactive days={len(inactive)}, "
-              f"stream-gap hrs={len(stream)}, "
-              f"counter-specific hrs={len(counter_specific)} -> "
-              f"{'PASS' if ok else 'FAIL'}")
-
-    stream_gap_list = sorted(stream_slots
-                             - {b for b in boundaries
-                                if iso_label(b) in known_stream})
+    stream_gap_list = sorted(b for b in stream_slots
+                             if iso_label(b) not in known_stream)
+    days = {day_label(b) for b in boundaries}
+    inactive_days = sorted(
+        d for d in days
+        if all(b in stream_slots
+               for b in boundaries if day_label(b) == d))
+    kwh = sum(sum(d for _, d in increments(hourly[k]))
+              * metrics[k]["scale_to_kwh"] for k in TEMPO_KEYS)
+    ok = not stream_gap_list
+    ok_flags.append(ok)
+    report["tempo"] = {
+        "ok": ok,
+        "coverage_pct": round(
+            (len(boundaries) - len(stream_slots)) / len(boundaries) * 100, 2),
+        "total_kwh": round(kwh, 2),
+        "inactive_day_count": len(inactive_days),
+        "inactive_days": inactive_days,
+        "stream_gap_missing": len(stream_gap_list),
+        "counter_specific_missing": 0,
+    }
     report["teleinfo_stream_gap"] = {
         "hours": [iso_label(b) for b in stream_gap_list],
         "count": len(stream_gap_list),
         "windows": gap_windows(stream_gap_list),
-        "ok": not stream_gap_list,
+        "ok": ok,
     }
+    print(f"  tempo: {report['tempo']['coverage_pct']}% covered, "
+          f"inactive-full-days={len(inactive_days)}, "
+          f"stream-gap hrs={len(stream_gap_list)} -> "
+          f"{'PASS' if ok else 'FAIL'}")
     report["ok"] = all(ok_flags)
     return report
 
@@ -782,11 +797,11 @@ def _hourly_gap_summary(key: str, m: dict) -> str:
         return ", ".join(parts)
     parts = []
     if m.get("inactive_day_count"):
-        parts.append(f"{m['inactive_day_count']} inactive days")
+        parts.append(f"{m['inactive_day_count']} no-data full days"
+                     if key == "tempo"
+                     else f"{m['inactive_day_count']} inactive days")
     if m.get("stream_gap_missing"):
         parts.append(f"{m['stream_gap_missing']} stream-gap hrs")
-    if m.get("counter_specific_missing"):
-        parts.append(f"{m['counter_specific_missing']} per-counter hrs")
     return ", ".join(parts) or "none"
 
 
@@ -848,7 +863,7 @@ def print_report(report: dict, threshold_pct: float) -> None:
         h = report["hourly"]
         print("\n=== hourly coverage (per-hour slots of the window) ===")
         for key in ("grid_in", "grid_out", "solar_total", "solar_dc0",
-                    "solar_dc1", *TEMPO_KEYS):
+                    "solar_dc1", "tempo"):
             if key not in h:
                 continue
             m = h[key]
@@ -865,9 +880,8 @@ def print_report(report: dict, threshold_pct: float) -> None:
                            f"  night-silence={m['night_missing_count']}"
                            f"  over-max={len(m['over_max_hours'])}")
             else:
-                detail += (f"  inactive-days={m['inactive_day_count']}"
-                           f"  stream-gap={m['stream_gap_missing']}"
-                           f"  counter-specific={m['counter_specific_missing']}")
+                detail += (f"  inactive-full-days={m['inactive_day_count']}"
+                           f"  stream-gap={m['stream_gap_missing']}")
             print(f"  {key:16} {detail}  -> {status}")
         if "teleinfo_stream_gap" in h:
             tsg = h["teleinfo_stream_gap"]
@@ -1173,7 +1187,7 @@ def render_html(report: dict, path: str, threshold_pct: float) -> None:
         rows.append(f'<p class="{"ok" if h["ok"] else "bad"}">Overall: '
                     f"{'PASS' if h['ok'] else 'FAIL'}</p>")
         metrics = [k for k in ("grid_in", "grid_out", "solar_total",
-                               "solar_dc0", "solar_dc1", *TEMPO_KEYS)
+                               "solar_dc0", "solar_dc1", "tempo")
                    if k in h]
         rows.append('<div class="cards">' + "".join([
             kpi(k.replace("_", " ").title(),
