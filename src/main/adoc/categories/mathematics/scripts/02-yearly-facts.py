@@ -72,9 +72,10 @@ def identity_check(record: dict[str, list],
                    tolerance: float) -> dict:
     """Grid In vs sum of *available* Tempo counters, computed per day.
 
-    Each day contributes its available counters only: a color whose column is
-    entirely empty that day is "inactive" (the White/Red silent days,
-    covered by Blue) and is recorded as incomplete, not as a fault. Partial
+    Each day contributes its available counters only: a day is recorded as
+    incomplete only when NO color reports at all (the Tempo draw was not
+    covered); a color whose column is entirely empty that day is "inactive"
+    (the White/Red silent days, covered by Blue) and is NOT a fault. Partial
     days (some missing hours in an otherwise active counter) still contribute
     their present hours; the divergence of full-coverage days is checked
     against the 5 % margin like Phase 0.
@@ -113,7 +114,7 @@ def identity_check(record: dict[str, list],
                 continue
             tempo_day += sum(present)
         tot_tempo += tempo_day
-        if missing:
+        if len(missing) == len(colors):
             incomplete_days.append({"date": day, "grid_kwh": round(grid_day, 2),
                                     "missing": missing})
         elif (len(b["grid"]) == 24
@@ -188,7 +189,7 @@ def main() -> int:
     status = "PASS" if identity["pass"] else "FAIL"
     print(f"  {status} (|delta| <= {identity['tolerance_pct']:.1f} % "
           f"tolerance)")
-    print(f"  incomplete days (inactive color, covered by Blue): "
+    print(f"  incomplete days (no Tempo color reported): "
           f"{len(identity['incomplete_days'])}")
     if identity["diverging_days"]:
         print(f"  diverging full days > 5 %: "

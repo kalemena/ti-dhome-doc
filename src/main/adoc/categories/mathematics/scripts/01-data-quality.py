@@ -155,7 +155,7 @@ def identity_check(url: str, cfg: dict, start: datetime.datetime,
         day = (start + datetime.timedelta(days=i)).strftime("%Y-%m-%d")
         tot_grid += g
         tot_tempo += s
-        if missing:
+        if len(missing) == len(tempo_delta):
             incomplete_days.append({"date": day, "grid_kwh": round(g, 2),
                                     "missing": missing})
         elif abs(g - s) > 0.05 * max(g, 0.001):
@@ -816,7 +816,7 @@ def print_report(report: dict, threshold_pct: float) -> None:
         print("\nmonth:    grid /  tempo    (kWh)")
         for mo, (g, s) in id_["monthly"].items():
             print(f"  {mo}  {g:7.2f}  {s:7.2f}   diff {g - s:+6.2f}")
-        print(f"\nincomplete days (some tempo counter silent): "
+        print(f"\nincomplete days (no tempo register reported): "
               f"{len(id_['incomplete_days'])} ({format_day_list([d['date'] for d in id_['incomplete_days']], 5)})")
         print(f"days diverging >{threshold_pct}% with complete data: "
               f"{len(id_['diverging_days'])}")
@@ -1090,7 +1090,7 @@ def render_html(report: dict, path: str, threshold_pct: float) -> None:
         rows.append(grouped_bars(groups))
         miss = report["missing"]
         rows.append(collapsed(
-            f"Incomplete days ({len(id_['incomplete_days'])})",
+            f"Incomplete days, no Tempo register reported ({len(id_['incomplete_days'])})",
             table(["Date", "Grid kWh", "Missing counters"],
                   [[d["date"], d["grid_kwh"], ", ".join(d["missing"])]
                    for d in id_["incomplete_days"]])))
