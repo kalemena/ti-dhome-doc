@@ -21,7 +21,7 @@ ifneq ($(END),)
 DX_ARGS += --end $(END)
 endif
 
-.PHONY: all venv setup data-quality solar hourly-check correct-solar report-html \
+.PHONY: all venv setup data-quality solar hourly-check report-html \
 	export facts contracts hourly scenarios solar-scenarios clean
 
 # Phase 8: `make all` drives the analysis phases 2..7 in order (data-quality
@@ -57,13 +57,6 @@ hourly-check:
 	$(PYTHON_BIN) $(SCRIPT_DIR)/01-data-quality.py $(DX_ARGS) \
 		--config $(SCRIPT_DIR)/energy-config.yaml --checks hourly --no-coverage \
 		--output $(SCRIPT_DIR)/output/data-quality-hourly.json
-
-# Corrected solar series (backward-redistribution of opendtu catch-up
-# flushes); raw VictoriaMetrics data is never modified.
-correct-solar:
-	$(PYTHON_BIN) $(SCRIPT_DIR)/01-data-quality.py $(DX_ARGS) \
-		--config $(SCRIPT_DIR)/energy-config.yaml \
-		--correct-solar $(SCRIPT_DIR)/output/solar-corrected
 
 ###########################
 # Analysis phases (2..7)

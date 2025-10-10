@@ -30,16 +30,10 @@ both present is written "nan" and counted in the per-column report, so gaps
 stay visible instead of being silently zeroed. The derived columns inherit the
 NaN of any input still missing.
 
-Optional --solar-corrected PREFIX merges the Phase 0/2 solar catch-up
-correction (PREFIX-hourly.csv from `make correct-solar`): the corrected
-solar_total series replaces the raw one and auto-consumed / home consumption
-are re-derived. Plain missing hours of the correction (empty corrected_kwh)
-remain NaN, exactly as reported there.
-
 Usage:
     01-hourly-export.py [-u VM_URL] [--config energy-config.yaml]
                         [--output scripts/output/hourly-energy.csv]
-                        [--cache-dir scripts/cache] [--solar-corrected PREFIX]
+                        [--cache-dir scripts/cache]
 """
 
 import argparse
@@ -80,18 +74,6 @@ def _add(a: float | None, b: float | None) -> float | None:
     return None if a is None or b is None else a + b
 
 
-def load_solar_correction(prefix: str) -> dict[str, dict[str, float | None]]:
-    """PREFIX-hourly.csv -> {metric: {utc_hour: corrected_kwh|None}}."""
-    out: dict[str, dict[str, float | None]] = {}
-    with open(f"{prefix}-hourly.csv", newline="") as f:
-        for row in csv.DictReader(f):
-            metric = row["metric"]
-            corr = row["corrected_kwh"]
-            out.setdefault(metric, {})[row["utc_hour"]] = (
-                float(corr) if corr else None)
-    return out
-
-
 def main() -> int:
     ap = argparse.ArgumentParser(
         description="Build the canonical hourly-energy.csv record")
@@ -100,9 +82,6 @@ def main() -> int:
     ap.add_argument("--config", default="scripts/energy-config.yaml")
     ap.add_argument("--output", default="scripts/output/hourly-energy.csv")
     ap.add_argument("--cache-dir", default="scripts/cache")
-    ap.add_argument("--solar-corrected", default=None, metavar="PREFIX",
-                    help="merge the solar correction PREFIX-hourly.csv into "
-                         "the record (raw VM data never used then)")
     ap.add_argument("--workers", type=int, default=16)
     args = ap.parse_args()
 
@@ -132,19 +111,7 @@ def main() -> int:
     for key in EXPORT_METRICS:
         inc[key] = increments(key)
 
-    solar = list(inc["solar_total"])
-    if args.solar_corrected:
-        corr = load_solar_correction(args.solar_corrected).get(
-            "solar_total", {})
-        merged = 0
-        for i, label in enumerate(labels):
-            v = corr.get(label)
-            if v is not None:
-                solar[i] = v
-                merged += 1
-        print(f"  corrected solar applied: {merged} hours replaced "
-              f"(from {args.solar_corrected}-hourly.csv)")
-
+    solar = inc["solar_total"]
     grid_in = inc["grid_in"]
     grid_out = inc["grid_out"]
     tempo = {c: [_add(inc[f"tempo_{c}_hp"][i], inc[f"tempo_{c}_hc"][i])
