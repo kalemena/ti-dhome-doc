@@ -11,9 +11,11 @@ Reproduces, as reusable functions, the probes executed against the live VM:
   5. solar consistency check: AC vs sum(DC channels), counter resets, flat
      days, and "exported more than produced" anomalies,
   6. hourly data-quality check (per-hour slots): coverage per metric, grid
-     in/out gap windows, solar daylight gaps vs expected night silence, and
-     solar hourly increments beyond the physical panel cap (1 kW panels ->
-     at most ~1 kWh/h; a larger delta means a counter jump / corruption),
+     in/out gap windows, solar daylight gaps vs expected night silence, solar
+     hourly increments beyond the physical panel cap (1 kW panels ->
+     at most ~1 kWh/h; a larger delta means a counter jump / corruption), and
+     the car / water heater / heaters counters (coverage, gap windows,
+     counter resets),
   7. optional monthly coverage probe per metric,
   8. optional HTML report rendering.
 
@@ -47,6 +49,12 @@ TEMPO_KEYS = [
     "tempo_white_hc", "tempo_white_hp",
     "tempo_red_hc", "tempo_red_hp",
 ]
+
+# Car / water heater / heaters: high consumers sitting behind the same garage
+# power meter as grid in/out, as cumulative energy counters (kWh). They get the
+# same hourly treatment as grid_in/grid_out: coverage, gap windows, and counter
+# resets. A flat hour is normal (nothing drawing), a fully flat window is not.
+CONSUMER_KEYS = ["electric_car", "water_heater", "heaters"]
 
 
 def load_config(path: str | None) -> dict:
@@ -361,11 +369,19 @@ def hourly_check(url: str, cfg: dict, start: datetime.datetime,
       so a missing counter (whole inactive-color days, single-register holes)
       is expected and NOT a gap as long as at least one of the six keeps
       reporting; only boundary hours where none of the six is reported ("stream
-      down") are failures.
+      down") are failures;
+    * electric_car / water_heater / heaters: cumulative counters behind the
+      same garage power meter as grid in/out, so the signals are the hourly
+      missing slots (grouped in gap windows), the counter resets (negative
+      hourly increments) and a window entirely flat (frozen counter). Flat
+      *hours* are expected - a car only draws while charging.
 
     Gaps recorded in `known_anomalies` (grid_missing_hour, solar_missing_hour,
     solar_over_max_hour) are acknowledged and do not fail the check; the
-    report still lists them.
+    report still lists them. The three consumer counters sit behind the same
+    garage power meter as grid in/out, so `grid_missing_hour` acknowledges
+    their outages too; `consumer_missing_hour` (optional, keyed per counter)
+    adds counter-specific ones.
     """
     metrics = cfg["metrics"]
     hq = cfg["hourly_quality"]
@@ -378,6 +394,8 @@ def hourly_check(url: str, cfg: dict, start: datetime.datetime,
     known_over = set(known.get("solar_over_max_hour", []))
     flat_days = set(known.get("solar_flat_day", []))
     known_stream = set(known.get("teleinfo_stream_gap_hour", []))
+    known_consumer = {k: set(v)
+                      for k, v in known.get("consumer_missing_hour", {}).items()}
 
     n_hours = n_days * 24
     boundaries = [int((start + datetime.timedelta(hours=i)).timestamp())
@@ -527,6 +545,50 @@ def hourly_check(url: str, cfg: dict, start: datetime.datetime,
           f"inactive-full-days={len(inactive_days)}, "
           f"stream-gap hrs={len(stream_gap_list)} -> "
           f"{'PASS' if ok else 'FAIL'}")
+
+    # ----- high consumers: car / water heater / heaters (kWh counters) -----
+    # Same garage power meter as grid in/out, so the same signals apply:
+    # missing hourly slots grouped in gap windows, and counter resets (a
+    # negative hourly increment). Flat hours are expected - a car only draws
+    # while charging - but a window that never moves means a frozen counter.
+    for key in CONSUMER_KEYS:
+        vals = hourly.get(key)
+        if vals is None:
+            continue
+        missing = [b for b in boundaries if b not in vals]
+        acknowledged = known_grid | known_consumer.get(key, set())
+        unknown = [ts for ts in missing if iso_label(ts) not in acknowledged]
+        scale = metrics[key].get("scale_to_kwh", 1.0)
+        deltas = increments(vals)
+        resets = [{"utc": iso_label(boundaries[i]), "kwh": round(d, 3)}
+                  for i, d in deltas if d < 0]
+        flat = sum(1 for _, d in deltas if d == 0)
+        frozen = bool(deltas) and flat == len(deltas)
+        ok = not unknown and not resets and not frozen
+        ok_flags.append(ok)
+        report[key] = {
+            "ok": ok,
+            "coverage_pct": round(
+                (len(boundaries) - len(missing)) / len(boundaries) * 100, 2),
+            "total_kwh": round(sum(d for _, d in deltas) * scale, 2),
+            "missing_slots": [iso_label(ts) for ts in sorted(missing)],
+            "missing_days": sorted({day_label(ts) for ts in missing}),
+            "gap_windows": gap_windows(missing),
+            "unknown_gap_windows": gap_windows(unknown),
+            "known_missing_slots": [iso_label(ts) for ts in sorted(missing)
+                                    if iso_label(ts) in acknowledged],
+            "resets": resets,
+            "flat_hours": flat,
+            "comparable_hours": len(deltas),
+            "frozen_window": frozen,
+        }
+        m = report[key]
+        print(f"  {key}: {m['coverage_pct']}% covered, "
+              f"{len(missing)} missing hrs "
+              f"({len(m['gap_windows'])} gap window(s)), "
+              f"total={m['total_kwh']:.2f} kWh, resets={len(resets)} -> "
+              f"{'PASS' if ok else 'FAIL'}")
+
     report["ok"] = all(ok_flags)
     return report
 
@@ -542,6 +604,17 @@ def format_day_list(days: list[str], limit: int = 12) -> str:
 def _hourly_gap_summary(key: str, m: dict) -> str:
     if key in ("grid_in", "grid_out"):
         return f"{len(m['missing_slots'])} missing/silent hours"
+    if key in CONSUMER_KEYS:
+        parts = [f"{len(m['missing_slots'])} missing hours"]
+        n_days_missing = len(m["missing_days"])
+        if n_days_missing:
+            parts.append(f"{n_days_missing} day"
+                         + ("s" if n_days_missing > 1 else ""))
+        if m["resets"]:
+            parts.append(f"{len(m['resets'])} resets")
+        if m["frozen_window"]:
+            parts.append("frozen window")
+        return ", ".join(parts)
     if key in ("solar_total", "solar_dc0", "solar_dc1"):
         parts = [
             f"{len(m['daylight_missing_slots'])} daylight missing",
@@ -618,19 +691,27 @@ def print_report(report: dict, threshold_pct: float) -> None:
         h = report["hourly"]
         print("\n=== hourly coverage (per-hour slots of the window) ===")
         for key in ("grid_in", "grid_out", "solar_total", "solar_dc0",
-                    "solar_dc1", "tempo"):
+                    "solar_dc1", "tempo", *CONSUMER_KEYS):
             if key not in h:
                 continue
             m = h[key]
             status = "PASS" if m["ok"] else "FAIL"
-            detail = f"{m['coverage_pct']:6.2f}%  total={m['total_kwh']:9.2f} kWh"
-            if key in ("grid_in", "grid_out"):
+            detail = (f"{m['coverage_pct']:6.2f}%  "
+                      f"total={m['total_kwh']:9.2f} kWh")
+            if key in ("grid_in", "grid_out") or key in CONSUMER_KEYS:
                 n_win = len(m["gap_windows"])
                 detail += (f"  missing={len(m['missing_slots'])} "
-                           f"({n_win} window(s))")
+                           f"({n_win} window(s)")
+                if key in CONSUMER_KEYS:
+                    detail += (f", {len(m['missing_days'])} day(s)"
+                               f", resets={len(m['resets'])}"
+                               f", flat={m['flat_hours']}"
+                               f"/{m['comparable_hours']}h")
+                detail += ")"
                 for w in m["gap_windows"][:3]:
                     detail += f"  [{w[0]} -> {w[1]}]"
             elif key in ("solar_total", "solar_dc0", "solar_dc1"):
+
                 detail += (f"  daylight-missing={len(m['daylight_missing_slots'])}"
                            f"  night-silence={m['night_missing_count']}"
                            f"  over-max={len(m['over_max_hours'])}")
@@ -942,7 +1023,7 @@ def render_html(report: dict, path: str, threshold_pct: float) -> None:
         rows.append(f'<p class="{"ok" if h["ok"] else "bad"}">Overall: '
                     f"{'PASS' if h['ok'] else 'FAIL'}</p>")
         metrics = [k for k in ("grid_in", "grid_out", "solar_total",
-                               "solar_dc0", "solar_dc1", "tempo")
+                               "solar_dc0", "solar_dc1", "tempo", *CONSUMER_KEYS)
                    if k in h]
         rows.append('<div class="cards">' + "".join([
             kpi(k.replace("_", " ").title(),
@@ -959,8 +1040,9 @@ def render_html(report: dict, path: str, threshold_pct: float) -> None:
                 f'<span class="bar-value">{m["coverage_pct"]:.2f}% — '
                 f'{e(_hourly_gap_summary(k, m))}</span></div>')
         rows.append('</div>')
+
         rows.append(collapsed(
-            "Per-metric detail (kWh totals, gap counts)",
+            "Per-metric detail (energy totals, gap counts)",
             table(["Metric", "Coverage", "Total kWh", "Gaps"],
                   [[k, f"{h[k]['coverage_pct']:.2f}%", h[k]["total_kwh"],
                     _hourly_gap_summary(k, h[k])] for k in metrics])))
@@ -969,6 +1051,27 @@ def render_html(report: dict, path: str, threshold_pct: float) -> None:
             rows.append(collapsed(
                 f"Teleinfo stream-gap windows ({tsg['count']} hours)",
                 table(["Start", "End"], tsg["windows"])))
+        consumers = [k for k in metrics if k in CONSUMER_KEYS]
+        if consumers:
+            rows.append(collapsed(
+                "Car / water heater / heaters counters: missing samples, "
+                "resets, flat hours (same garage power meter as grid in/out)",
+                table(["Metric", "Total kWh", "Missing hours", "Missing days",
+                       "Gap windows", "Resets", "Flat hours"],
+                      [[k, h[k]["total_kwh"], len(h[k]["missing_slots"]),
+                        ", ".join(h[k]["missing_days"]) or "-",
+                        "; ".join(f"{a} -> {b}"
+                                  for a, b in h[k]["gap_windows"]) or "-",
+                        len(h[k]["resets"]),
+                        f"{h[k]['flat_hours']}/{h[k]['comparable_hours']}"]
+                       for k in consumers])))
+            reset_rows = [[k, r["utc"], r["kwh"]] for k in consumers
+                          for r in h[k]["resets"]]
+            if reset_rows:
+                rows.append(collapsed(
+                    "High consumers: counter resets (negative hourly "
+                    "increments)",
+                    table(["Metric", "UTC", "kWh"], reset_rows)))
         for key in ("solar_total", "solar_dc0", "solar_dc1"):
             m = h.get(key)
             if m and m["over_max_hours"]:

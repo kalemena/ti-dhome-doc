@@ -17,6 +17,10 @@ window:
 
 # Every cumulative counter is treated as a raw reading; scale_to_kwh converts
 # its native unit into kWh (teleinfo counters are Wh).
+# The last three entries (car, water heater, heaters) are cumulative counters
+# too, read from the other phase of the same garage power meter (C01) as
+# grid in/out (C03): the data-quality checks assert their coverage and
+# counter resets, and their consumption is a subset of the grid draw.
 metrics:
   solar_total:
     description: Solar panel total production (AC, inverter)
@@ -75,18 +79,18 @@ metrics:
     scale_to_kwh: 0.001
   electric_car:
     description: Electric car consumption (garage power meter, phase 1)
-    selector: 'sensors_zigbee_power_l1{location="C01~Garage~PowerMeter"}'
-    unit: W
+    selector: 'sensors_zigbee_energy_l1{location="C01~Garage~PowerMeter",db="sensors"}'
+    unit: kWh
     scale_to_kwh: 1.0
   water_heater:
     description: Water heater consumption (garage power meter, phase 2)
-    selector: 'sensors_zigbee_power_l2{location="C01~Garage~PowerMeter"}'
-    unit: W
+    selector: 'sensors_zigbee_energy_l2{location="C01~Garage~PowerMeter",db="sensors"}'
+    unit: kWh
     scale_to_kwh: 1.0
   heaters:
     description: Heaters consumption (garage power meter, phase 3)
-    selector: 'sensors_zigbee_power_l3{location="C01~Garage~PowerMeter"}'
-    unit: W
+    selector: 'sensors_zigbee_energy_l3{location="C01~Garage~PowerMeter",db="sensors"}'
+    unit: kWh
     scale_to_kwh: 1.0
 
 # Energy tariffs (EUR/kWh, contract formulas from readme.adoc "Costs of Energy"):
@@ -175,6 +179,13 @@ hourly_quality:
 # hour). These are acknowledged as known/reviewed so the hourly check PASSes;
 # they remain listed in the report:
 #   grid_missing_hour: single zigbee meter outage window 2025-10-12 05:00 -> 09:00
+#   consumer_missing_hour: optional, per high-consumer counter
+#     (electric_car, water_heater, heaters) missing hours that are
+#     known/reviewed. Those three sit behind the same garage power meter as
+#     grid in/out, so grid_missing_hour already acknowledges their outages;
+#     add counter-specific ones here. Empty today: the only gap is the shared
+#     2025-10-12 05:00 -> 09:00 window.
+#     Example: consumer_missing_hour: {electric_car: ["2026-01-05 03:00"]}
 #   solar_missing_hour: opendtu silence during daylight; the symmetric night
 #     hours are expected (no sun, no samples) and are not listed here.
 #     2026-05-24 is covered by solar_flat_day above.

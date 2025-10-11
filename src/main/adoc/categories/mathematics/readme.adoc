@@ -17,7 +17,8 @@ The queries below are implemented, scripted and reproducible in the `scripts/` d
 Makefile drives every step:
 
 * `make setup` - create the venv and install `requirements.txt` (once);
-* `make data-quality` - checks: identity Grid In vs Tempo, solar consistency, hourly coverage and solar cap;
+* `make data-quality` - checks: identity Grid In vs Tempo, solar consistency, hourly coverage and solar cap,
+  plus the hourly coverage / counter resets of the car, water heater and heaters counters;
 * `make export` - build the canonical `scripts/output/hourly-energy.csv` (8 760 hourly increments of every
   counter, solar + grid + the six Tempo registers);
 * `make facts`, `make contracts`, `make hourly`, `make scenarios`,
