@@ -104,8 +104,10 @@ config file.
   * *real gaps:* no tempo counter increments while Grid In > 0 -> flagged.
 - *Hourly data-quality check* (`--checks hourly`, target `make hourly-check`):
   per-hour coverage for every counter (grid in/out, solar AC+DC, the six tempo
-  counters), gap windows, solar daylight gaps vs expected night silence, and
-  solar hourly increments beyond the physical 1 kW panel cap (~1 kWh/h).
+  counters), gap windows, solar daylight gaps vs expected night silence,
+  solar hourly increments beyond the physical 1 kW panel cap (~1 kWh/h), and
+  the coverage / counter resets of the car, water heater and heaters counters
+  (other phases of the same garage power meter as grid in/out).
 
 [NOTE]
 ====
@@ -138,6 +140,11 @@ Result of the Phase 0 check (window 2025-09-01 -> 2026-09-01):
 *   recurring daytime outages) + per-counter holes (blue_hc 33, white/red ~49-75).
 *   Deliberately NOT acknowledged -> the hourly check FAILs until these are
 *   reviewed / fixed, so the gaps stay visible.
+* - Car / water heater / heaters (high consumers, other phases of the same
+*   garage power meter): 99.94 % hourly coverage each, the only gap being the
+*   shared zigbee meter window 2025-10-12 05:00 -> 09:00 (acknowledged by
+*   `grid_missing_hour`), 0 counter resets -> PASS. Yearly: 632.5 kWh (car),
+*   576.0 kWh (water heater), 119.0 kWh (heaters).
 ====
 
 *Acceptance:* every role in the config maps to a selector returning series

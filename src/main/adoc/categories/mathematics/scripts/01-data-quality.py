@@ -9,7 +9,11 @@ Reproduces, as reusable functions, the probes executed against the live VM:
      (inactive White/Red days are expected, not faults),
   4. missing-day classification per counter + deficit by missing combination,
   5. solar consistency check: AC vs sum(DC channels), counter resets, flat
-     days, and "exported more than produced" anomalies,
+     days, and "exported more than produced" anomalies; the JSON keeps the
+     monthly solar / export / auto-consumed aggregates plus the same
+     per-day aggregates (`solar.daily`), and `identity.daily` holds the
+     per-day grid / tempo pair, so the HTML report can render both the
+     monthly and the daily "solar / grid / export / auto-consumed" views,
   6. hourly data-quality check (per-hour slots): coverage per metric, grid
      in/out gap windows, solar daylight gaps vs expected night silence, solar
      hourly increments beyond the physical panel cap (1 kW panels ->
@@ -144,6 +148,7 @@ def identity_check(url: str, cfg: dict, start: datetime.datetime,
     incomplete_days = []
     diverging_days = []
     monthly: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0])
+    daily: list[dict] = []
 
     for i in range(n_days):
         g = grid_delta[i]
@@ -168,6 +173,8 @@ def identity_check(url: str, cfg: dict, start: datetime.datetime,
         mo = day[:7]
         monthly[mo][0] += g
         monthly[mo][1] += s
+        daily.append({"date": day, "grid_kwh": round(g, 2),
+                      "tempo_kwh": round(s, 2)})
 
     diff = tot_grid - tot_tempo
     return {
@@ -177,6 +184,7 @@ def identity_check(url: str, cfg: dict, start: datetime.datetime,
         "diff_pct": round(diff / tot_grid * 100, 2) if tot_grid else None,
         "incomplete_days": incomplete_days,
         "diverging_days": diverging_days,
+        "daily": daily,
         "monthly": {k: [round(v[0], 2), round(v[1], 2)] for k, v in
                     sorted(monthly.items())},
     }
@@ -226,6 +234,7 @@ def solar_check(url: str, cfg: dict, start: datetime.datetime, n_days: int,
     unknown_imports = []
     dla = []
     monthly: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0])
+    daily: list[dict] = []
     tot_ac = tot_dc0 = tot_dc1 = tot_out = 0.0
 
     for i in range(n_days):
@@ -250,6 +259,13 @@ def solar_check(url: str, cfg: dict, start: datetime.datetime, n_days: int,
         mo = day[:7]
         monthly[mo][0] += a if a is not None else 0.0
         monthly[mo][1] += o if o is not None else 0.0
+        daily.append({
+            "date": day,
+            "solar_kwh": round(a, 2) if a is not None else None,
+            "export_kwh": round(o, 2) if o is not None else None,
+            "auto_consumed_kwh": (round(a - o, 2)
+                                  if a is not None and o is not None else None),
+        })
         if dc0[i] is not None:
             tot_dc0 += dc0[i]
         if dc1[i] is not None:
@@ -269,11 +285,13 @@ def solar_check(url: str, cfg: dict, start: datetime.datetime, n_days: int,
         "solar_dc1_kwh": round(tot_dc1, 2),
         "ac_vs_dc_sum_diff_kwh": round(ac_dc_diff, 2),
         "grid_out_total_kwh": round(tot_out, 2),
+        "auto_consumed_total_kwh": round(tot_ac - tot_out, 2),
         "missing_days": missing,
         "negative_days": negative,
         "flat_days": flat,
         "export_exceeds_production_days": imports,
         "unknown_anomaly_days": unknown_imports + unknown_flat,
+        "daily": daily,
         "monthly": {k: [round(v[0], 2), round(v[1], 2)] for k, v in
                     sorted(monthly.items())},
     }
@@ -646,6 +664,8 @@ def print_report(report: dict, threshold_pct: float) -> None:
             print(f"  {mo}  {g:7.2f}  {s:7.2f}   diff {g - s:+6.2f}")
         print(f"\nincomplete days (no tempo register reported): "
               f"{len(id_['incomplete_days'])} ({format_day_list([d['date'] for d in id_['incomplete_days']], 5)})")
+        print(f"daily aggregates (grid / tempo): {len(id_['daily'])} day(s), "
+              f"full table in the JSON report")
         print(f"days diverging >{threshold_pct}% with complete data: "
               f"{len(id_['diverging_days'])}")
         for d in id_["diverging_days"][:10]:
@@ -668,6 +688,8 @@ def print_report(report: dict, threshold_pct: float) -> None:
         print(f"AC-(DC0+DC1)  : {s['ac_vs_dc_sum_diff_kwh']:+9.2f} kWh")
         print(f"Grid Out total: {s['grid_out_total_kwh']:9.2f} kWh "
               f"(~{s['grid_out_total_kwh'] / s['solar_total_kwh'] * 100:.0f}% exported)" if s['solar_total_kwh'] else "")
+        print(f"Auto-consumed : {s['auto_consumed_total_kwh']:9.2f} kWh "
+              f"(solar - export)")
         print(f"missing days: {len(s['missing_days'])} ({format_day_list(s['missing_days'])})")
         print(f"negative deltas (resets): {len(s['negative_days'])} "
               f"({format_day_list([d['date'] for d in s['negative_days']])})")
@@ -680,6 +702,8 @@ def print_report(report: dict, threshold_pct: float) -> None:
         print("\nmonth:   solar /    out / auto-consumed")
         for mo, (a, o) in s["monthly"].items():
             print(f"  {mo}  {a:7.2f}  {o:7.2f}  {a - o:8.2f}")
+        print(f"daily aggregates (solar / export / auto-consumed): "
+              f"{len(s['daily'])} day(s), full table in the JSON report")
 
     if "coverage" in report:
         print("\n=== coverage probe ===")
@@ -839,6 +863,9 @@ def render_html(report: dict, path: str, threshold_pct: float) -> None:
         pw = width - pl - pr
         ph = height - pt - pb
         n = len(x_labels)
+        # One x label per point is unreadable on a daily series (365 points),
+        # so thin the tick labels out; the last one is always kept.
+        label_step = 1 if n <= 24 else n // 14
 
         def X(i):
             return pl + (pw * i / (n - 1) if n > 1 else pw / 2)
@@ -863,6 +890,8 @@ def render_html(report: dict, path: str, threshold_pct: float) -> None:
                        f'stroke-width="2" stroke-linejoin="round" '
                        f'points="{pts}"/>')
         for i, lab in enumerate(x_labels):
+            if i % label_step and i != n - 1:
+                continue
             svg.append(f'<text class="axis" x="{X(i):.1f}" '
                        f'y="{height - 8}" text-anchor="middle">'
                        f'{e(lab)}</text>')
@@ -947,7 +976,7 @@ def render_html(report: dict, path: str, threshold_pct: float) -> None:
 
     if "solar" in report:
         s = report["solar"]
-        auto = round(s["solar_total_kwh"] - s["grid_out_total_kwh"], 2)
+        auto = s["auto_consumed_total_kwh"]
         rows.append('<div class="cards">' + "".join([
             kpi("Solar AC", f"{s['solar_total_kwh']:.2f} kWh", "produced"),
             kpi("Grid Out", f"{s['grid_out_total_kwh']:.2f} kWh", "exported"),
@@ -986,6 +1015,44 @@ def render_html(report: dict, path: str, threshold_pct: float) -> None:
             series.append(("Grid In", "#8e44ad", grid_vals))
         rows.append(line_chart(labels, series,
                                tooltip_series=tooltip_extra))
+        daily = s.get("daily") or []
+        if daily:
+            # Grid In per day lives in the identity probe, merged here on the
+            # date like the monthly chart does.
+            id_daily = {d["date"]: d["grid_kwh"] for d in
+                        (report.get("identity") or {}).get("daily", [])}
+            rows.append("<h3>Daily solar / grid / export / auto-consumed "
+                        "(kWh)</h3>")
+            d_labels, d_solar, d_export, d_auto, d_grid = [], [], [], [], []
+            for d in daily:
+                # A day with no solar or no export sample is left out of the
+                # chart rather than plotted as a fake 0 kWh dip.
+                if d["solar_kwh"] is None or d["export_kwh"] is None:
+                    continue
+                d_labels.append(d["date"][5:])
+                d_solar.append(d["solar_kwh"])
+                d_export.append(-d["export_kwh"])
+                d_auto.append(d["auto_consumed_kwh"])
+                d_grid.append(id_daily.get(d["date"]))
+            if len(d_labels) > 1:
+                d_series = [("Solar", "#e6b800", d_solar),
+                            ("Auto-consumption", "#2e9e5b", d_auto)]
+                if all(v is not None for v in d_grid):
+                    d_series.append(("Grid In", "#8e44ad", d_grid))
+                rows.append(line_chart(
+                    d_labels, d_series,
+                    tooltip_series=[("Export", "#4a90d9", d_export)]))
+            else:
+                rows.append(f"<p>{len(daily)} day(s) aggregated</p>")
+            num = lambda v: "-" if v is None else f"{v:.2f}"
+            rows.append(collapsed(
+                f"Daily solar / grid / export / auto-consumed "
+                f"({len(daily)} days)",
+                table(["Date", "Solar kWh", "Grid In kWh", "Export kWh",
+                       "Auto-consumed kWh"],
+                      [[d["date"], num(d["solar_kwh"]),
+                        num(id_daily.get(d["date"])), num(d["export_kwh"]),
+                        num(d["auto_consumed_kwh"])] for d in daily])))
         anomal = []
         for d in s["missing_days"]:
             anomal.append([d, "missing", "", ""])
