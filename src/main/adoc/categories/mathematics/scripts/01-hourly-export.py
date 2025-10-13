@@ -16,6 +16,12 @@ For each hour of the window (default 2025-09-01 -> 2026-09-01):
                                  (HP and HC separately, Wh -> kWh); these
                                  encode the exact HP/HC split used by the
                                  contract pricing (Phase 4)
+  * electric_car_kwh             car counter hourly increment (phase 1 of the
+  * water_heater_kwh             water heater counter hourly increment (phase 2)
+  * heaters_kwh                  heaters counter hourly increment (phase 3)
+                                 the three high consumers of the garage power
+                                 meter C01; their consumption is a subset of
+                                 the grid draw, not an addition to it
   * auto_consumed_kwh            solar_total - grid_out
   * home_consumption_kwh         grid_in + auto_consumed
 
@@ -54,10 +60,16 @@ EXPORT_METRICS = [
     "tempo_blue_hc", "tempo_blue_hp",
     "tempo_white_hc", "tempo_white_hp",
     "tempo_red_hc", "tempo_red_hp",
+    "electric_car", "water_heater", "heaters",
 ]
 
 TEMPO_COLOR_KEYS = ["blue", "white", "red"]
 TEMPO_COLUMNS = [f"tempo_{c}_hp_hc" for c in TEMPO_COLOR_KEYS]
+
+# High consumers behind the same garage power meter as grid in/out (C01): one
+# output column each, named after the metric key.
+CONSUMER_KEYS = ["electric_car", "water_heater", "heaters"]
+CONSUMER_COLUMNS = [f"{k}_kwh" for k in CONSUMER_KEYS]
 
 OUTPUT_COLUMNS = [
     "utc_hour",
@@ -66,6 +78,7 @@ OUTPUT_COLUMNS = [
     "tempo_blue_hp", "tempo_blue_hc",
     "tempo_white_hp", "tempo_white_hc",
     "tempo_red_hp", "tempo_red_hc",
+    *CONSUMER_COLUMNS,
     "auto_consumed_kwh", "home_consumption_kwh",
 ]
 
@@ -138,6 +151,8 @@ def main() -> int:
                 "tempo_white_hc": inc["tempo_white_hc"][i],
                 "tempo_red_hp": inc["tempo_red_hp"][i],
                 "tempo_red_hc": inc["tempo_red_hc"][i],
+                **{col: inc[key][i] for key, col in zip(CONSUMER_KEYS,
+                                                       CONSUMER_COLUMNS)},
                 "auto_consumed_kwh": auto[i],
                 "home_consumption_kwh": home[i],
             }
@@ -162,9 +177,11 @@ def main() -> int:
                    ("tempo_blue_hc", inc["tempo_blue_hc"]),
                    ("tempo_white_hp", inc["tempo_white_hp"]),
                    ("tempo_white_hc", inc["tempo_white_hc"]),
-                   ("tempo_red_hp", inc["tempo_red_hp"]),
-                   ("tempo_red_hc", inc["tempo_red_hc"]),
-                   ("auto_consumed_kwh", auto),
+                    ("tempo_red_hp", inc["tempo_red_hp"]),
+                    ("tempo_red_hc", inc["tempo_red_hc"]),
+                    *[(col, inc[key])
+                      for key, col in zip(CONSUMER_KEYS, CONSUMER_COLUMNS)],
+                    ("auto_consumed_kwh", auto),
                    ("home_consumption_kwh", home),
                ]}
     for col in OUTPUT_COLUMNS[1:]:
