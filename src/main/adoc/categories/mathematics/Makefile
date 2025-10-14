@@ -48,16 +48,6 @@ data-quality:
 		--output $(SCRIPT_DIR)/output/data-quality.json \
 		--html $(SCRIPT_DIR)/output/data-quality.html
 
-solar:
-	$(PYTHON_BIN) $(SCRIPT_DIR)/01-data-quality.py $(DX_ARGS) \
-		--config $(SCRIPT_DIR)/energy-config.yaml --checks solar \
-		--output $(SCRIPT_DIR)/output/data-quality-solar.json
-
-hourly-check:
-	$(PYTHON_BIN) $(SCRIPT_DIR)/01-data-quality.py $(DX_ARGS) \
-		--config $(SCRIPT_DIR)/energy-config.yaml --checks hourly --no-coverage \
-		--output $(SCRIPT_DIR)/output/data-quality-hourly.json
-
 ###########################
 # Analysis phases (2..7)
 # Ran in order by `make all` (export must come first: phases 3..7 read
