@@ -24,6 +24,10 @@ For each hour of the window (default 2025-09-01 -> 2026-09-01):
                                  the grid draw, not an addition to it
   * auto_consumed_kwh            solar_total - grid_out
   * home_consumption_kwh         grid_in + auto_consumed
+  * {metric}_counter_kwh         the twelve cumulative counters above, read at
+                                  the end of the hour (closing boundary of the
+                                  slot, same kWh scaling as the increments), so
+                                  counter[i] - counter[i-1] == increment[i]
 
 Method: one query_range(step=1h) per metric over the year (split per calendar
 month so VictoriaMetrics' per-series sample cap is never hit), then hourly
@@ -71,8 +75,7 @@ TEMPO_COLUMNS = [f"tempo_{c}_hp_hc" for c in TEMPO_COLOR_KEYS]
 CONSUMER_KEYS = ["electric_car", "water_heater", "heaters"]
 CONSUMER_COLUMNS = [f"{k}_kwh" for k in CONSUMER_KEYS]
 
-OUTPUT_COLUMNS = [
-    "utc_hour",
+INCREMENT_COLUMNS = [
     "solar_total_kwh", "grid_in_kwh", "grid_out_kwh",
     "tempo_blue_hp_hc", "tempo_white_hp_hc", "tempo_red_hp_hc",
     "tempo_blue_hp", "tempo_blue_hc",
@@ -82,9 +85,24 @@ OUTPUT_COLUMNS = [
     "auto_consumed_kwh", "home_consumption_kwh",
 ]
 
+# Cumulative reading of each physical counter, at the boundary closing the hour
+# of the row (so the first difference of a counter column is its increment
+# column). Same scaling as the increments: teleinfo registers stay in kWh.
+COUNTER_COLUMNS = [f"{k}_counter_kwh" for k in EXPORT_METRICS]
+
+OUTPUT_COLUMNS = ["utc_hour", *INCREMENT_COLUMNS, *COUNTER_COLUMNS]
+
 
 def _add(a: float | None, b: float | None) -> float | None:
     return None if a is None or b is None else a + b
+
+
+def _cell(value: float | None) -> str:
+    return "nan" if value is None else f"{value:.4f}"
+
+
+def _total(value: float | None) -> str:
+    return "nan" if value is None else f"{value:.2f}"
 
 
 def main() -> int:
@@ -111,18 +129,26 @@ def main() -> int:
 
     print("Fetching hourly series (cached per metric)...")
 
-    def increments(key: str) -> list[float | None]:
+    hour_ends = vmlib.hour_boundaries(start, n_days)[1:]
+
+    def series(key: str) -> tuple[list[float | None], list[float | None]]:
+        """(hourly increments, end-of-hour counter readings) of one metric."""
         m = cfg["metrics"][key]
         vals = cache.hourly(key, start, n_days, url=url,
                             selector=m["selector"])
-        return [
-            None if d is None else d * m["scale_to_kwh"]
+        scale = m["scale_to_kwh"]
+        increments = [
+            None if d is None else d * scale
             for d in vmlib.hourly_increments(vals, start, n_days)
         ]
+        counters = [None if ts not in vals else vals[ts] * scale
+                    for ts in hour_ends]
+        return increments, counters
 
     inc: dict[str, list[float | None]] = {}
+    ctr: dict[str, list[float | None]] = {}
     for key in EXPORT_METRICS:
-        inc[key] = increments(key)
+        inc[key], ctr[key] = series(key)
 
     solar = inc["solar_total"]
     grid_in = inc["grid_in"]
@@ -133,63 +159,60 @@ def main() -> int:
             else solar[i] - grid_out[i] for i in range(n_hours)]
     home = [_add(grid_in[i], auto[i]) for i in range(n_hours)]
 
+    # Every output column, in output order, as a full hourly series.
+    columns: dict[str, list[float | None]] = {
+        "solar_total_kwh": solar,
+        "grid_in_kwh": grid_in,
+        "grid_out_kwh": grid_out,
+        **{f"tempo_{c}_hp_hc": tempo[c] for c in TEMPO_COLOR_KEYS},
+        "tempo_blue_hp": inc["tempo_blue_hp"],
+        "tempo_blue_hc": inc["tempo_blue_hc"],
+        "tempo_white_hp": inc["tempo_white_hp"],
+        "tempo_white_hc": inc["tempo_white_hc"],
+        "tempo_red_hp": inc["tempo_red_hp"],
+        "tempo_red_hc": inc["tempo_red_hc"],
+        **{col: inc[key] for key, col in zip(CONSUMER_KEYS, CONSUMER_COLUMNS)},
+        "auto_consumed_kwh": auto,
+        "home_consumption_kwh": home,
+        **{col: ctr[key] for key, col in zip(EXPORT_METRICS, COUNTER_COLUMNS)},
+    }
+
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
     with open(args.output, "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(OUTPUT_COLUMNS)
         for i in range(n_hours):
-            values = {
-                "solar_total_kwh": solar[i],
-                "grid_in_kwh": grid_in[i],
-                "grid_out_kwh": grid_out[i],
-                "tempo_blue_hp_hc": tempo["blue"][i],
-                "tempo_white_hp_hc": tempo["white"][i],
-                "tempo_red_hp_hc": tempo["red"][i],
-                "tempo_blue_hp": inc["tempo_blue_hp"][i],
-                "tempo_blue_hc": inc["tempo_blue_hc"][i],
-                "tempo_white_hp": inc["tempo_white_hp"][i],
-                "tempo_white_hc": inc["tempo_white_hc"][i],
-                "tempo_red_hp": inc["tempo_red_hp"][i],
-                "tempo_red_hc": inc["tempo_red_hc"][i],
-                **{col: inc[key][i] for key, col in zip(CONSUMER_KEYS,
-                                                       CONSUMER_COLUMNS)},
-                "auto_consumed_kwh": auto[i],
-                "home_consumption_kwh": home[i],
-            }
-            w.writerow([labels[i]] + [
-                "nan" if values[c] is None else f"{values[c]:.4f}"
-                for c in OUTPUT_COLUMNS[1:]
-            ])
+            w.writerow([labels[i]] + [_cell(columns[c][i])
+                                       for c in OUTPUT_COLUMNS[1:]])
 
     # Report per column: hourly coverage + yearly total.
     print(f"\nWritten: {args.output} ({n_hours} rows)\n")
     print(f"{'column':24} {'total kWh':>12} {'missing hrs':>12}")
     summary = {c: (sum(v for v in col if v is not None),
                    sum(1 for v in col if v is None))
-               for c, col in [
-                   ("solar_total_kwh", solar),
-                   ("grid_in_kwh", grid_in),
-                   ("grid_out_kwh", grid_out),
-                   ("tempo_blue_hp_hc", tempo["blue"]),
-                   ("tempo_white_hp_hc", tempo["white"]),
-                   ("tempo_red_hp_hc", tempo["red"]),
-                   ("tempo_blue_hp", inc["tempo_blue_hp"]),
-                   ("tempo_blue_hc", inc["tempo_blue_hc"]),
-                   ("tempo_white_hp", inc["tempo_white_hp"]),
-                   ("tempo_white_hc", inc["tempo_white_hc"]),
-                    ("tempo_red_hp", inc["tempo_red_hp"]),
-                    ("tempo_red_hc", inc["tempo_red_hc"]),
-                    *[(col, inc[key])
-                      for key, col in zip(CONSUMER_KEYS, CONSUMER_COLUMNS)],
-                    ("auto_consumed_kwh", auto),
-                   ("home_consumption_kwh", home),
-               ]}
-    for col in OUTPUT_COLUMNS[1:]:
+               for c, col in columns.items()}
+    for col in INCREMENT_COLUMNS:
         total, missing = summary[col]
         print(f"{col:24} {total:12.2f} {missing:12d}")
     if any(missing for _, missing in summary.values()):
         print("\nRows with missing hours are written 'nan' (not interpolated);")
         print("see the Phase 0 hourly data-quality report for the gap frames.")
+
+    # Counter columns: no total (a sum of readings is meaningless), so report
+    # the reading at both ends of the window, its change and the decreases.
+    print(f"\n{'column':24} {'first kWh':>12} {'last kWh':>12} "
+          f"{'change kWh':>12} {'resets':>8} {'missing hrs':>12}")
+    for col in COUNTER_COLUMNS:
+        vals = columns[col]
+        present = [v for v in vals if v is not None]
+        first, last = (present[0], present[-1]) if present else (None, None)
+        resets = sum(1 for before, after in zip(vals, vals[1:])
+                     if before is not None and after is not None
+                     and after < before)
+        change = None if first is None else last - first
+        print(f"{col:24} {_total(first):>12} {_total(last):>12} "
+              f"{_total(change):>12} {resets:8d} "
+              f"{len(vals) - len(present):12d}")
 
     return 0
 

@@ -186,7 +186,12 @@ instant queries (as done in the analysis session).
 
 *Output:* `scripts/output/hourly-energy.csv` (~8 760 rows) with columns
 `utc_hour, solar_total_kwh, grid_in_kwh, grid_out_kwh, tempo_blue_hp_hc,
-tempo_white_hp_hc, tempo_red_hp_hc, auto_consumed_kwh, home_consumption_kwh`.
+tempo_white_hp_hc, tempo_red_hp_hc, auto_consumed_kwh, home_consumption_kwh`,
+followed by one `{metric}_counter_kwh` column per physical counter (solar,
+grid in/out, the six Tempo registers, car, water heater, heaters): the
+cumulative reading at the boundary closing the hour, in the same kWh unit, so
+`counter[i] - counter[i-1] == increment[i]`. The report prints their first/last
+reading, change and any decrease (counter reset) instead of a yearly total.
 
 [NOTE]
 ====
