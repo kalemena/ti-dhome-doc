@@ -22,7 +22,7 @@ DX_ARGS += --end $(END)
 endif
 
 .PHONY: all venv setup data-quality solar hourly-check report-html \
-	export facts contracts hourly scenarios solar-scenarios clean
+	export transform facts contracts hourly scenarios solar-scenarios clean
 
 # Phase 8: `make all` drives the analysis phases 2..7 in order (data-quality
 # checks stay separate targets). `setup` boots the venv first.
@@ -59,6 +59,19 @@ export:
 	$(PYTHON_BIN) $(SCRIPT_DIR)/01-hourly-export.py $(VM_ARGS) \
 		--config $(SCRIPT_DIR)/energy-config.yaml \
 		--output $(SCRIPT_DIR)/output/hourly-energy.csv
+
+# Hourly transform: the "as if" filters on the exported record (car removed,
+# water heater night energy moved to the day window). Both filters are on by
+# default; add `CAR=--no-filter-car` / `WATER=--no-filter-water` to skip one.
+CAR ?=
+WATER ?=
+
+transform:
+	$(PYTHON_BIN) $(SCRIPT_DIR)/01-hourly-transform.py \
+		--config $(SCRIPT_DIR)/energy-config.yaml \
+		--input $(SCRIPT_DIR)/output/hourly-energy.csv \
+		--output $(SCRIPT_DIR)/output/hourly-transform.csv \
+		$(CAR) $(WATER)
 
 facts:
 	$(PYTHON_BIN) $(SCRIPT_DIR)/02-yearly-facts.py \

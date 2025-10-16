@@ -293,6 +293,25 @@ inactive_counter_days:
     - "2026-08-19"
     - "2026-08-31"
 
+# Hourly transform filters (`01-hourly-transform.py`, target `make transform`,
+# readme "Question - predictions"): the "as if" filters applied to the hourly
+# record. Both are enabled by default on the command line; this block only
+# carries the *parameters* of the water filter (the car filter has none).
+#
+# * `night_hours`: UTC hours of the water heater energy that is moved (the
+#   hours outside the solar day light).
+# * `day_hours`: UTC hours that energy is moved *to*, same UTC day, always
+#   earlier in absolute time. The daily total is unchanged: night Grid In
+#   drops, day Grid In grows by the same kWh.
+# * `distribution`: how the day's night energy is spread over `day_hours`:
+#   `grid_in` (proportional to the Grid In already metered in those hours -
+#   the water heater runs on top of an existing draw) or `equal`.
+hourly_transform:
+  water:
+    night_hours: [[19, 24], [0, 6]]
+    day_hours: [[11, 19]]
+    distribution: grid_in
+
 # Phase 6 - shift scenario assumptions (`05-shift-scenarios.py`,
 # target `make scenarios`, readme "Question - predictions").
 # "What if we move some consumption?": each scenario moves a fraction of the
