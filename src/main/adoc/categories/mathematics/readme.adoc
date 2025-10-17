@@ -21,19 +21,25 @@ Makefile drives every step:
   plus the hourly coverage / counter resets of the car, water heater and heaters counters;
 * `make export` - build the canonical `scripts/output/hourly-energy.csv` (8 760 hourly increments of every
   counter, solar + grid + the six Tempo registers);
+* `make transform` - rebuild that record under the two "as if" consumption filters (car energy removed,
+  water heater night energy moved to the day window) into
+  `scripts/output/hourly-transform.csv` (plus a JSON and an HTML report);
 * `make facts`, `make contracts`, `make hourly`, `make scenarios`,
   `make solar-scenarios` - phases 3..7 (yearly facts, contract comparison,
   24 h solar/grid profile + seasonal highlights, shift scenarios, solar x2/x3
   and battery sizing);
-* `make all` - runs phases 2..7 in order (`export`, `facts`, `contracts`,
-  `hourly`, `scenarios`, `solar-scenarios`);
+* `make all` - runs phases 2..7 in order (`export`, `transform`, `facts`,
+  `contracts`, `hourly`, `scenarios`, `solar-scenarios`);
 * `make clean` - removes the venv, the `scripts/cache/` and
   `scripts/output/` artifacts.
 
 Once `make export` has run, every downstream phase works *offline*: the raw
 VictoriaMetrics readings are cached under `scripts/cache/` and the analyses
-read the exported hourly record. Costs, tariffs, windows and scenario
-assumptions live in `scripts/energy-config.yaml`.
+read the exported hourly record. The yearly facts of `make facts` read the
+*transformed* record, so they describe the modelled house: Grid In, home
+consumption and the Tempo totals follow the filters, while solar, grid out and
+auto-consumed solar stay the measured values. Costs, tariffs, windows and
+scenario assumptions live in `scripts/energy-config.yaml`.
 
 == Optimization
 

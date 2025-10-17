@@ -200,6 +200,41 @@ read the CSV and work offline. Generation must stay deterministic from a full
 cache.
 ====
 
+=== Phase 2b - Hourly transform ("as if" consumption filters)
+
+*File:* `01-hourly-transform.py`, target `make transform`.
+
+Rebuilds the hourly record under two consumption filters, so the house can be
+modelled *as if* one of its high consumers had behaved differently. Both are
+on by default (`CAR=--no-filter-car` / `WATER=--no-filter-water` to skip one):
+
+- *car removed:* the hourly increments of `electric_car_kwh` are deducted from
+  Grid In and from the Tempo registers of the same hour, as if the car had
+  never been charged. The energy leaves the house: yearly Grid In and Sum Tempo
+  both drop by exactly the removed kWh, and the solar / export / auto-consumed
+  columns are untouched.
+- *water heater night energy moved to the day window:* the energy burnt
+  outside the solar day light (19h00-23h59 and 00h00-05h59 UTC by default) is
+  moved earlier, into the day window of the same UTC day (11h00-18h59 by
+  default, see `hourly_transform` in `energy-config.yaml`). Grid In and the
+  Tempo registers of the destination hours grow by the moved kWh, so the daily
+  total is unchanged and only the register mix (High/Low cost x Tempo color)
+  shifts.
+
+A filter can only move kWh an hour can prove: a removal is capped by the
+hour's Grid In and by the Tempo energy that hour actually registered, and a
+moved kWh is only re-created in a day hour that has both Grid In and Tempo
+data. Unmovable kWh stays where it is and is reported as such.
+
+*Output:* `scripts/output/hourly-transform.csv` (8 760 rows), plus
+`hourly-transform.json` and `hourly-transform.html` (same basename). The
+increment columns of `hourly-energy.csv` are republished under the same names
+(plus the filter columns `car_removed_kwh`, `water_moved_from_night_kwh`,
+`water_moved_to_day_kwh`), so phases 3..7 can read it as well; the cumulative
+`{metric}_counter_kwh` columns are not republished, since no physical counter
+is modified by a filter. Gaps (NaN hours) are carried over unchanged, and the
+Grid In ~ Sum Tempo identity survives both filters.
+
 === Phase 3 - Yearly facts (readme "Setting the time facts")
 
 *File:* `02-yearly-facts.py`, target `make facts`.
@@ -214,8 +249,13 @@ cache.
   covered by the Blue counters, as established in Phase 0); reported
   PASS/FAIL against `identity_tolerance` (default 5 %).
 
-*Source:* recomputes totals from `hourly-energy.csv` (offline) rather than
-new DB queries.
+*Source:* recomputes totals from `hourly-transform.csv`, the record of Phase 2b
+(offline) rather than new DB queries. The facts are therefore the *modelled*
+ones of the filtered house: `grid_in_kwh`, `home_consumption_kwh` and the three
+`tempo_*_hp_hc` totals follow the transform, while `solar_total_kwh`,
+`grid_out_kwh` and `auto_consumed_kwh` stay the measured ones (the transform
+does not touch them). Reading `hourly-energy.csv` instead (`--input`) gives the
+measured facts.
 
 *Output:* `scripts/output/facts.csv` + summary printed; identity check
 reported as PASS/FAIL with delta.
@@ -308,8 +348,8 @@ capacity and per k) + summary table.
 *File:* category Makefile targets `all`, `clean`; outputs/cache layout.
 
 *Actions:*
-- `make all` runs phases 2..7 in order (export, facts, contracts, hourly,
-  scenarios, solar-scenarios).
+- `make all` runs phases 2..7 in order (export, transform, facts, contracts,
+  hourly, scenarios, solar-scenarios).
 - Cache + outputs stay under `scripts/` (git-friendly, no DB dependency).
 - Update `readme.adoc` note to point at the scripts/Makefile usage.
 
@@ -338,8 +378,11 @@ capacity and per k) + summary table.
 | export
 | Run `01-hourly-export.py` (build the 8 760-row hourly record)
 
+| transform
+| Run `01-hourly-transform.py` (the "as if" car / water-heater filters)
+
 | facts
-| Run `02-yearly-facts.py` (yearly static facts)
+| Run `02-yearly-facts.py` (yearly static facts, over the transformed record)
 
 | contracts
 | Run `03-contract-costs.py` (contracts comparison)
@@ -354,7 +397,7 @@ capacity and per k) + summary table.
 | Run `06-solar-scenarios.py` (solar x2/x3 + battery sizing)
 
 | all
-| Run export, facts, contracts, hourly, scenarios, solar-scenarios
+| Run export, transform, facts, contracts, hourly, scenarios, solar-scenarios
 
 | clean
 | Remove venv, cache and outputs
@@ -371,13 +414,14 @@ Conventions followed (from the other categories):
 == Deliverables
 
 * `scripts/vmlib.py`, `scripts/energy-config.yaml`, `scripts/requirements.txt`
-* `scripts/01-hourly-export.py`, `02-yearly-facts.py`,
-  `03-contract-costs.py`, `04-hourly-profile.py`, `05-shift-scenarios.py`,
-  `06-solar-scenarios.py`
+* `scripts/01-hourly-export.py`, `01-hourly-transform.py`,
+  `02-yearly-facts.py`, `03-contract-costs.py`, `04-hourly-profile.py`,
+  `05-shift-scenarios.py`, `06-solar-scenarios.py`
 * Makefile at category root
-* Outputs: `scripts/output/hourly-energy.csv`, `facts.csv`,
-  `contracts.json`, `hourly-profile.csv`, `scenarios.json`,
-  `solar-scenarios.json`, `battery-sizing.csv`
+* Outputs: `scripts/output/hourly-energy.csv`, `hourly-transform.csv`
+  (+ `hourly-transform.json` / `.html`), `facts.csv`, `contracts.json`,
+  `hourly-profile.csv`, `scenarios.json`, `solar-scenarios.json`,
+  `battery-sizing.csv`
 
 == Acceptance criteria
 

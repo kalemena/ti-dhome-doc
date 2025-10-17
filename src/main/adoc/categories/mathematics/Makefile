@@ -26,7 +26,9 @@ endif
 
 # Phase 8: `make all` drives the analysis phases 2..7 in order (data-quality
 # checks stay separate targets). `setup` boots the venv first.
-all: setup export facts contracts hourly scenarios solar-scenarios
+# The transform sits between the export and the facts: `facts` reads the
+# transformed record, the cost/profile/scenario phases read the exported one.
+all: setup export transform facts contracts hourly scenarios solar-scenarios
 
 ###########################
 # Python virtual environment
@@ -50,7 +52,8 @@ data-quality:
 
 ###########################
 # Analysis phases (2..7)
-# Ran in order by `make all` (export must come first: phases 3..7 read
+# Ran in order by `make all` (export first, then transform: phase 3 reads
+# scripts/output/hourly-transform.csv, phases 4..7 read
 # scripts/output/hourly-energy.csv). Every phase after 2 works offline from
 # the exported record; raw VM readings are cached under scripts/cache/.
 ###########################
@@ -76,7 +79,7 @@ transform:
 facts:
 	$(PYTHON_BIN) $(SCRIPT_DIR)/02-yearly-facts.py \
 		--config $(SCRIPT_DIR)/energy-config.yaml \
-		--input $(SCRIPT_DIR)/output/hourly-energy.csv \
+		--input $(SCRIPT_DIR)/output/hourly-transform.csv \
 		--output $(SCRIPT_DIR)/output/facts.csv
 
 contracts:
