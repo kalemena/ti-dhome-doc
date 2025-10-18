@@ -2,7 +2,8 @@
 """
 Phase 3 - yearly facts: the static "time facts" of the analysis.
 
-Reads the Phase 2 canonical record (`hourly-energy.csv`) offline and emits
+Reads the transformed hourly record (`hourly-transform.csv`, built by
+`01-hourly-transform.py` from the Phase 2 canonical record) offline and emits
 `facts.csv`: the yearly total of every counter (solar, grid, the three Tempo
 colors x HP+HC) plus the derived auto-consumed solar and home consumption.
 The identity check Grid In vs sum(Tempo) is recomputed per day over the
@@ -10,14 +11,28 @@ The identity check Grid In vs sum(Tempo) is recomputed per day over the
 (no data) and the Blue counters cover the consumption, exactly as established
 in Phase 0.
 
+The source is the *transformed* record, so the facts are the "as if" ones of
+the modelled house (car energy removed, water heater night energy moved to
+the day window), not the metered ones. Only the columns the transform leaves
+alone are still measured values: `solar_total_kwh`, `grid_out_kwh` and hence
+`auto_consumed_kwh`. `grid_in_kwh`, `home_consumption_kwh` and the three
+`tempo_*_hp_hc` totals are modelled. The filters act on Grid In and on the
+Tempo registers together, so the identity below survives the transform and
+still passes the tolerance; they cap every moved kWh at what the hour can
+prove, so Grid In and Sum Tempo do not move by an exactly equal amount (the
+delta shifts by a few kWh). Pass `--input scripts/output/hourly-energy.csv` to
+read the measured record instead.
+
 No DB query is made: totals and the identity are rebuilt from the hourly
 increments of the record, so the phase is offline, fast and deterministic.
 
 Facts computed (per the window of the record, default 2025-09-01 -> 2026-09-01):
-  solar_total_kwh          opendtu AC yearly increase
+  solar_total_kwh          opendtu AC yearly increase (measured)
   grid_in_kwh / grid_out_kwh  zigbee meter yearly increases
+                           (grid_in_kwh modelled, grid_out_kwh measured)
   tempo_{blue,white,red}_hp_hc  teleinfo yearly increase per Tempo color
-                           (the record carries HP+HC combined per color)
+                           (the record carries HP+HC combined per color;
+                           modelled)
   auto_consumed_kwh        = solar - grid_out (per hour, then summed)
   home_consumption_kwh     = grid_in + auto_consumed (per hour, then summed)
   identity                 Grid In vs sum(available Tempo counters) per day,
@@ -25,11 +40,13 @@ Facts computed (per the window of the record, default 2025-09-01 -> 2026-09-01):
                            (default 5 %).
 
 Missing hours are not interpolated: each column is summed over its present
-hours and the count of missing hours is reported, so gaps stay visible.
+hours and the count of missing hours is reported, so gaps stay visible. The
+transform preserves the gaps of the record it reads, so the counts below are
+the measured ones.
 
 Usage:
     02-yearly-facts.py [--config energy-config.yaml]
-                       [--input scripts/output/hourly-energy.csv]
+                       [--input scripts/output/hourly-transform.csv]
                        [--output scripts/output/facts.csv] [--tolerance 0.05]
 """
 
@@ -44,6 +61,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import vmlib
 
 TEMPO_COLUMNS = ["tempo_blue_hp_hc", "tempo_white_hp_hc", "tempo_red_hp_hc"]
+
+# Published only by 01-hourly-transform.py: their presence is what tells the
+# transformed record from the measured one (hourly-energy.csv).
+TRANSFORM_COLUMNS = ["car_removed_kwh", "water_moved_from_night_kwh",
+                     "water_moved_to_day_kwh"]
 
 # metric column (in the record) -> row name in facts.csv
 FACT_METRICS = [
@@ -139,10 +161,11 @@ def identity_check(record: dict[str, list],
 
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="Yearly energy facts from the canonical hourly record")
+        description="Yearly energy facts from the transformed hourly record")
     ap.add_argument("--config", default="scripts/energy-config.yaml")
-    ap.add_argument("--input", default="scripts/output/hourly-energy.csv",
-                    help="Phase 2 canonical record (hourly-energy.csv)")
+    ap.add_argument("--input", default="scripts/output/hourly-transform.csv",
+                    help="transformed record (01-hourly-transform.py); pass "
+                         "hourly-energy.csv for the measured record")
     ap.add_argument("--output", default="scripts/output/facts.csv")
     ap.add_argument("--tolerance", type=float, default=None,
                     help="identity tolerance, fraction (default from config)")
@@ -153,7 +176,7 @@ def main() -> int:
                  else cfg.get("identity_tolerance", 0.05))
 
     if not os.path.exists(args.input):
-        print(f"error: {args.input} not found - run `make export` first")
+        print(f"error: {args.input} not found - run `make transform` first")
         return 1
 
     record = vmlib.load_hourly_energy(args.input)
@@ -166,8 +189,15 @@ def main() -> int:
     n_hours = len(record["utc_hour"])
     start = record["utc_hour"][0] if n_hours else "?"
     end = record["utc_hour"][-1] if n_hours else "?"
-    print(f"Source: {args.input} (offline, no DB query)")
-    print(f"Window: {start} -> {end} ({n_hours} hours)\n")
+    basis = ("transformed" if TRANSFORM_COLUMNS[0] in record
+             else "measured")
+    print(f"Source: {args.input} ({basis}, offline, no DB query)")
+    print(f"Window: {start} -> {end} ({n_hours} hours)")
+    if basis == "transformed":
+        print("Basis:   modelled house (car removed, water heater night "
+              "energy\n         moved to the day window); solar, grid out and "
+              "auto-consumed\n         are the measured ones")
+    print()
 
     facts = {name: yearly_total(record, column) for column, name, _ in FACT_METRICS}
     identity = identity_check(record, tolerance)
