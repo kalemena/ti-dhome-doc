@@ -35,9 +35,10 @@ Makefile drives every step:
 
 Once `make export` has run, every downstream phase works *offline*: the raw
 VictoriaMetrics readings are cached under `scripts/cache/` and the analyses
-read the exported hourly record. The yearly facts of `make facts` read the
-*transformed* record, so they describe the modelled house: Grid In, home
-consumption and the Tempo totals follow the filters, while solar, grid out and
+read the exported hourly record. The yearly facts of `make facts` and the
+24 h profile of `make hourly` read the *transformed* record, so they describe
+the modelled house: Grid In (and its HP/HC split), home consumption, the Tempo
+totals and the surplus follow the filters, while solar, grid out and
 auto-consumed solar stay the measured values. Costs, tariffs, windows and
 scenario assumptions live in `scripts/energy-config.yaml`.
 

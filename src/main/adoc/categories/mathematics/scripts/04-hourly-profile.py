@@ -2,7 +2,8 @@
 """
 Phase 5 - hourly solar / grid profile (readme "Can we optimize Solar").
 
-Reads the Phase 2 canonical record (`hourly-energy.csv`) offline and answers,
+Reads the *transformed* hourly record (`hourly-transform.csv`, built by
+`01-hourly-transform.py` from the Phase 2 canonical record) offline and answers,
 for the whole year, "what happens at hour H of the day":
 
   * solar_kwh             opendtu solar produced in that hour (sum of the
@@ -21,6 +22,17 @@ for the whole year, "what happens at hour H of the day":
 Each hour-of-day slot also reports how many of its 365 slots carried data
 (`*_present_hours`, missing = 365 - present, never interpolated).
 
+The source is the *transformed* record, so the profile is the "as if" one of
+the modelled house (car energy removed, water heater night energy moved to the
+day window), not the metered one. Only the columns the transform leaves alone
+are still measured values: `solar_kwh` (opendtu), `grid_out_kwh` and hence
+`auto_consumed_kwh`. `grid_in_kwh`, its HP/HC split, `home_consumption_kwh` and
+`surplus_kwh` (Solar - Grid In) are modelled: the car filter removes energy from
+the draw, and the water filter moves the night energy into the day window,
+which sits inside the Tempo HP hours, so the HP/HC split of the profile
+follows the filters. Pass `--input scripts/output/hourly-energy.csv` to profile
+the measured record.
+
 *Seasonal highlights:* the year is also split into the 4 meteorological
 seasons configured in `energy-config.yaml` (`seasons`, UTC months), and the
 same solar / grid-in / grid-out / auto-consumed / home-consumption metrics are
@@ -36,7 +48,7 @@ Output:
 
 Usage:
     04-hourly-profile.py [--config energy-config.yaml]
-                         [--input scripts/output/hourly-energy.csv]
+                         [--input scripts/output/hourly-transform.csv]
                          [--output scripts/output/hourly-profile.csv]
                          [--grafana scripts/output/hourly-profile-grafana.csv]
 """
@@ -59,6 +71,11 @@ DEFAULT_SEASONS = {
     "spring": [3, 4, 5],
     "summer": [6, 7, 8],
 }
+
+# Published only by 01-hourly-transform.py: their presence is what tells the
+# transformed record from the measured one (hourly-energy.csv).
+TRANSFORM_COLUMNS = ["car_removed_kwh", "water_moved_from_night_kwh",
+                     "water_moved_to_day_kwh"]
 
 CSV_COLUMNS = [
     "hour",
@@ -190,8 +207,9 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         description="24h solar/grid profile + seasonal highlights")
     ap.add_argument("--config", default="scripts/energy-config.yaml")
-    ap.add_argument("--input", default="scripts/output/hourly-energy.csv",
-                    help="Phase 2 canonical record (hourly-energy.csv)")
+    ap.add_argument("--input", default="scripts/output/hourly-transform.csv",
+                    help="transformed record (01-hourly-transform.py); pass "
+                         "hourly-energy.csv for the measured record")
     ap.add_argument("--output", default="scripts/output/hourly-profile.csv",
                     help="24-row hourly-profile.csv (JSON derived from it)")
     ap.add_argument("--grafana", default=None, metavar="PATH",
@@ -201,7 +219,7 @@ def main() -> int:
     cfg = vmlib.load_config(args.config)
 
     if not os.path.exists(args.input):
-        print(f"error: {args.input} not found - run `make export` first")
+        print(f"error: {args.input} not found - run `make transform` first")
         return 1
 
     record = vmlib.load_hourly_energy(args.input)
@@ -215,8 +233,14 @@ def main() -> int:
     n_hours = len(record["utc_hour"])
     start = record["utc_hour"][0] if n_hours else "?"
     end = record["utc_hour"][-1] if n_hours else "?"
-    print(f"Source: {args.input} (offline, no DB query)")
-    print(f"Window: {start} -> {end} ({n_hours} hours)\n")
+    basis = ("transformed" if TRANSFORM_COLUMNS[0] in record else "measured")
+    print(f"Source: {args.input} ({basis}, offline, no DB query)")
+    print(f"Window: {start} -> {end} ({n_hours} hours)")
+    if basis == "transformed":
+        print("Basis:   modelled house (car removed, water heater night "
+              "energy\n         moved to the day window); solar, grid out and "
+              "auto-consumed\n         are the measured ones")
+    print()
 
     hp_hours = _norm_hp_hours(cfg)
     seasons = cfg.get("seasons", DEFAULT_SEASONS)
@@ -258,6 +282,7 @@ def main() -> int:
         "window": {"start": start, "end": end, "hours": n_hours,
                    "days": n_days},
         "source": args.input,
+        "basis": basis,
         "hp_hours_utc": hp_hours,
         "hours": hours,
         "totals": totals,

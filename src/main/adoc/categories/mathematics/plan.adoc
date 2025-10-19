@@ -284,7 +284,14 @@ reported as PASS/FAIL with delta.
 * Surplus balance: Solar - Grid In per hour.
 * Provide seasonal highlights by splitting into 4 seasons measure comparing metrics fro grid in/out and solr production
 
-*Source:* `hourly-energy.csv`.
+*Source:* `hourly-transform.csv`, the record of Phase 2b (offline) rather than
+new DB queries, so the profile is the *modelled* one of the filtered house:
+`solar_kwh`, `grid_out_kwh` and `auto_consumed_kwh` stay the measured values
+(the transform does not touch them), while `grid_in_kwh`, its HP/HC split,
+`home_consumption_kwh` and the surplus follow the filters - the water move
+lands in the day window, which is inside the HP hours, so the HP/HC split
+follows it too. Reading `hourly-energy.csv` instead (`--input`) gives the
+measured profile.
 
 *Output:* `scripts/output/hourly-profile.csv` (24 lines) + optional Grafana-ready table.
 
