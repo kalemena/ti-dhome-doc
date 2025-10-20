@@ -314,6 +314,14 @@ measured profile.
 
 *File:* `06-solar-scenarios.py`, target `make solar-scenarios`.
 
+*Source:* `hourly-transform.csv`, the record of Phase 2b (offline) rather than
+new DB queries, so the scenarios are the *modelled* ones of the filtered house:
+the scaled solar profile is built on the measured `solar_total_kwh`, but the
+Grid In the displacement model is anchored on, the six Tempo registers every
+scenario is re-priced against, and therefore the break-even `k` and the battery
+recommendations, all follow the filters. Reading `hourly-energy.csv` instead
+(`--input`) gives the measured scenarios.
+
 *Models "what if we add solar" and "what if we add batteries" based on the
 365-day hourly profiles (solar production and home consumption).*
 

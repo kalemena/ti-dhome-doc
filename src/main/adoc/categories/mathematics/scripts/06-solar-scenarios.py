@@ -2,7 +2,8 @@
 """
 Phase 7 - solar scaling and battery sizing (readme "Question - predictions").
 
-Reads the Phase 2 canonical record (`hourly-energy.csv`) offline and models
+Reads the *transformed* hourly record (`hourly-transform.csv`, built by
+`01-hourly-transform.py` from the Phase 2 canonical record) offline and models
 "what if we add solar" and "what if we add batteries", at hourly resolution,
 for each solar scale `k` in `solar_scenarios.scale_factors`.
 
@@ -20,12 +21,26 @@ is anchored on the measured meter:
     grid_out' = grid_out + max(0, d_i - grid_in')     the rest is exported
     auto'     = auto     + min(d_i, grid_in)          solar consumed at home
 
-At k=1 the model reproduces the meter exactly, so the baseline identity with
-Phase 4 is preserved. Every k is re-priced under the 5 contracts of
+At k=1 the model reproduces the source record exactly, so the baseline
+identity with the yearly facts of the same record is preserved. Every k is
+re-priced under the 5 contracts of
 energy-config.yaml; the register that bills each hour is inferred from its
 day Tempo color and HP/HC period (same geometry as Phase 6), and each hour's
 grid-draw reduction is subtracted from that register (only over hours where
 the register actually accrued, so missing hours stay untouched).
+
+The source is the *transformed* record, so the scenarios are the "as if" ones
+of the modelled house (car energy removed, water heater night energy moved to
+the day window), not the metered ones. Only the columns the transform leaves
+alone are still measured values: `solar_total_kwh`, `grid_out_kwh` and hence
+`auto_consumed_kwh` - and the solar itself, so the scaled solar profile and
+the measured solar baseline are the same. `grid_in_kwh`, `home_consumption_kwh`
+and the six Tempo registers are modelled: the car filter removes draw from the
+hour, and the water filter moves night energy into the day window (inside the
+HP hours), so the baseline the displacement model is anchored on - and hence
+every register total, contract cost, break-even k and battery recommendation -
+follows the filters. Pass `--input scripts/output/hourly-energy.csv` to model
+the measured record instead.
 
 Battery simulation
 ------------------
@@ -59,7 +74,7 @@ Outputs:
 
 Usage:
     06-solar-scenarios.py [--config energy-config.yaml]
-                          [--input scripts/output/hourly-energy.csv]
+                          [--input scripts/output/hourly-transform.csv]
                           [--output scripts/output/solar-scenarios.json]
                           [--sizing-output scripts/output/battery-sizing.csv]
 """
@@ -74,6 +89,11 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import vmlib
+
+# Published only by 01-hourly-transform.py: their presence is what tells the
+# transformed record from the measured one (hourly-energy.csv).
+TRANSFORM_COLUMNS = ["car_removed_kwh", "water_moved_from_night_kwh",
+                     "water_moved_to_day_kwh"]
 
 
 def _load_phase6() -> "module":
@@ -314,6 +334,36 @@ def price_all(tariffs: dict[str, vmlib.Tariff],
     return priced, cheapest
 
 
+def _roi_text(row: dict) -> str:
+    """Payback / return suffix of a battery console line (empty without capex)."""
+    if "payback_years" not in row:
+        return ""
+    if row["payback_years"] is None:
+        return ", never pays back"
+    return (f", payback {row['payback_years']:.1f} yr "
+            f"({row['yearly_return_pct']:.1f} %/yr)")
+
+
+def roi(capacity_kwh: float, saving_eur: float,
+        price_eur_per_kwh: float | None) -> dict:
+    """Capex, payback and yearly return of a battery of `capacity_kwh`.
+
+    `saving_eur` is the yearly saving vs the same k without a battery, so the
+    return is measured on the storage alone. A non-positive saving never pays
+    back: `payback_years` is None and the return is negative.
+    """
+    if price_eur_per_kwh is None or capacity_kwh <= 0:
+        return {}
+    capex = capacity_kwh * price_eur_per_kwh
+    return {
+        "capex_eur": round(capex, 2),
+        "payback_years": (round(capex / saving_eur, 1)
+                          if saving_eur > 0 else None),
+        "yearly_return_pct": (round(saving_eur / capex * 100, 2)
+                              if capex else None),
+    }
+
+
 def baseline_facts(record: dict[str, list]) -> dict:
     solar = sum_present(record["solar_total_kwh"])
     auto = sum_present(record["auto_consumed_kwh"])
@@ -337,8 +387,9 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         description="Solar scaling (x1/x2/x3) + battery sizing scenarios")
     ap.add_argument("--config", default="scripts/energy-config.yaml")
-    ap.add_argument("--input", default="scripts/output/hourly-energy.csv",
-                    help="Phase 2 canonical record (hourly-energy.csv)")
+    ap.add_argument("--input", default="scripts/output/hourly-transform.csv",
+                    help="transformed record (01-hourly-transform.py); pass "
+                         "hourly-energy.csv for the measured record")
     ap.add_argument("--output", default="scripts/output/solar-scenarios.json")
     ap.add_argument("--sizing-output",
                     default="scripts/output/battery-sizing.csv")
@@ -358,6 +409,9 @@ def main() -> int:
         max_daily_cycles = float(max_daily_cycles)
     sizing_step = float(batt_cfg.get("sizing_step_kwh", 1.0))
     sizing_max = float(batt_cfg.get("sizing_max_kwh", 20.0))
+    price_per_kwh = batt_cfg.get("price_eur_per_kwh")
+    price_per_kwh = (None if price_per_kwh is None
+                     else float(price_per_kwh))
     threshold = float(scfg.get(
         "marginal_saving_threshold_eur_per_kwh", 0.30))
     ref_contract = scfg.get("marginal_reference_contract", "best")
@@ -371,7 +425,7 @@ def main() -> int:
     be_table = [float(k) for k in be.get("table_factors", [])]
 
     if not os.path.exists(args.input):
-        print(f"error: {args.input} not found - run `make export` first")
+        print(f"error: {args.input} not found - run `make transform` first")
         return 1
 
     record = vmlib.load_hourly_energy(args.input)
@@ -385,10 +439,20 @@ def main() -> int:
     n_hours = len(record["utc_hour"])
     start = record["utc_hour"][0] if n_hours else "?"
     end = record["utc_hour"][-1] if n_hours else "?"
-    print(f"Source: {args.input} (offline, no DB query)")
-    print(f"Window: {start} -> {end} ({n_hours} hours)\n")
+    basis = ("transformed" if TRANSFORM_COLUMNS[0] in record else "measured")
+    print(f"Source: {args.input} ({basis}, offline, no DB query)")
+    print(f"Window: {start} -> {end} ({n_hours} hours)")
+    if basis == "transformed":
+        print("Basis:   modelled house (car removed, water heater night "
+              "energy\n         moved to the day window); solar, grid out and "
+              "auto-consumed\n         are the measured ones")
+    print()
 
     tariffs = vmlib.load_tariffs(cfg)
+    if ref_contract != "best" and ref_contract not in tariffs:
+        print(f"error: marginal_reference_contract '{ref_contract}' is not a "
+              f"configured tariff")
+        return 1
     base = baseline_facts(record)
     base_regs = {m: float(base["tempo_kwh"][m]) for m in vmlib.TEMPO_METRIC_KEYS}
     baseline_priced, baseline_cheapest = price_all(tariffs, base_regs)
@@ -396,7 +460,7 @@ def main() -> int:
     geometry = _load_phase6()
     hour_reg, hour_present = register_for_hours(record, geometry)
 
-    print("Baseline (measured, k=1):")
+    print(f"Baseline (k=1, {basis}):")
     print(f"  solar {base['solar_total_kwh']:9.2f} kWh | auto "
           f"{base['auto_consumed_kwh']:9.2f} ({base['auto_consumption_pct']} %) "
           f"| grid in {base['grid_in_kwh']:9.2f} | grid out "
@@ -414,6 +478,9 @@ def main() -> int:
                                   hour_reg, hour_present)
         priced, cheapest = price_all(tariffs, regs)
         tempo_optimal = cheapest == "tempo"
+        # ROI and the marginal sweep are both measured against this contract
+        # ('best' = the cheapest one at this k, or a contract named in config).
+        ref_k = cheapest if ref_contract == "best" else ref_contract
 
         gi_reduction = base["grid_in_kwh"] - gi
         gi_reduction_pct = (gi_reduction / base["grid_in_kwh"] * 100
@@ -440,6 +507,8 @@ def main() -> int:
                      for i in range(n_hours)],
                     hour_reg, hour_present)
                 priced_bat, _cheapest_bat = price_all(tariffs, regs_bat)
+                saving_ref = (priced[ref_k]["cost"]
+                              - priced_bat[ref_k]["cost"])
                 contracts = {}
                 for name, bcost in priced.items():
                     saving = bcost["cost"] - priced_bat[name]["cost"]
@@ -461,6 +530,7 @@ def main() -> int:
                     "total_charged_kwh": round(sim["total_charged_kwh"], 2),
                     "cycles_used": round(sim["cycles_used"], 1),
                     "contracts": contracts,
+                    **roi(cap, saving_ref, price_per_kwh),
                 })
 
         night_batteries = []
@@ -543,6 +613,8 @@ def main() -> int:
                             sim["total_charged_kwh"], 2),
                         "cycles_used": round(sim["cycles_used"], 1),
                         "contracts": contracts,
+                        **roi(cap, priced[ref_k]["cost"]
+                              - priced_night[ref_k]["cost"], price_per_kwh),
                     })
                 night_batteries.append(night)
 
@@ -672,6 +744,7 @@ def main() -> int:
             "saving_eur": savings[rec]["saving_eur"],
             "grid_in_reduction_kwh": savings[rec]["grid_in_reduction_kwh"],
             "threshold_eur_per_kwh": threshold,
+            **roi(rec, savings[rec]["saving_eur"], price_per_kwh),
             "note": (("at upper bound of the sizing sweep" if rec >= sizing_max
                       else "")),
         }
@@ -697,7 +770,8 @@ def main() -> int:
                       f"gridIn -{b['grid_in_reduction_kwh']:7.1f} kWh "
                       f"({b['grid_in_reduction_pct']:.1f} %) "
                       f"tempo saving {tempo_saving:7.2f} EUR "
-                      f"({b['cycles_used']:.1f} cycles)")
+                      f"({b['cycles_used']:.1f} cycles)"
+                      + _roi_text(b))
         if s["night_charge_batteries"]:
             print("  night grid charge (+Tempo HC arbitrage):")
             for b in s["night_charge_batteries"]:
@@ -706,7 +780,8 @@ def main() -> int:
                       f"grid bought {b['grid_charged_kwh']:7.1f} kWh, "
                       f"gridIn -{b['grid_in_reduction_kwh']:7.1f} kWh, "
                       f"tempo saving {tempo_saving:7.2f} EUR "
-                      f"({b['cycles_used']:.1f} cycles)")
+                      f"({b['cycles_used']:.1f} cycles)"
+                      + _roi_text(b))
 
     print(f"\nBreak-even (Tempo stops being optimal):")
     print(f"{'k':>5} {'cheapest':>13} {'tempo EUR':>9} {'best EUR':>9}")
@@ -726,18 +801,23 @@ def main() -> int:
               f"{threshold * 100:.0f} cEUR/kWh-year, reference "
               f"{'cheapest contract' if ref_contract == 'best' else ref}):")
         print(f"{'k':>4} {'cap kWh':>8} {'final marg':>10} "
-              f"{'saving EUR':>10} {'gridIn red':>10}")
+              f"{'saving EUR':>10} {'gridIn red':>10} {'payback':>9}")
         for k in scale_factors:
             r = recommendations[k]
+            payback = ("n/a" if "payback_years" not in r
+                       else "never" if r["payback_years"] is None
+                       else f"{r['payback_years']:.1f} yr")
             print(f"{k:>4.1f} {r['capacity_kwh']:>8.1f} "
                   f"{r['marginal_saving_eur_per_kwh']:>10.4f} "
-                  f"{r['saving_eur']:>10.2f} {r['grid_in_reduction_kwh']:>10.2f}"
+                  f"{r['saving_eur']:>10.2f} {r['grid_in_reduction_kwh']:>10.2f} "
+                  f"{payback:>9}"
                   + (f"   {r['note']}" if r["note"] else ""))
 
     # ---- write outputs ------------------------------------------------------
     result = {
         "window": {"start": start, "end": end, "hours": n_hours},
         "source": args.input,
+        "basis": basis,
         "baseline": {
             **{k1: round(v, 4) if isinstance(v, float) else v
                for k1, v in base.items() if k1 != "tempo_kwh"},
@@ -759,6 +839,7 @@ def main() -> int:
             "max_charge_power_kw": max_charge,
             "max_discharge_power_kw": max_discharge,
             "max_daily_cycles": max_daily_cycles,
+            "price_eur_per_kwh": price_per_kwh,
         },
         "night_grid_charge": {
             "enabled": night_enabled,

@@ -376,7 +376,10 @@ shift_scenarios:
 #   - `max_daily_cycles`: optional cap on energy charged per UTC day
 #     (full cycles x capacity); null = no cap;
 #   - `sizing_step_kwh` / `sizing_max_kwh`: resolution and upper bound of the
-#     marginal-savings sweep used to recommend a capacity per k.
+#     marginal-savings sweep used to recommend a capacity per k;
+#   - `price_eur_per_kwh`: capex of the storage, linear in capacity, used only
+#     to turn a yearly saving into a payback period and a yearly return. Set it
+#     to null to skip the ROI (no capex is inferred from the data).
 #
 # * `marginal_saving_threshold_eur_per_kwh`: yearly saving (EUR) that the last
 #   added kWh of storage must return to still be worth adding. The
@@ -399,6 +402,9 @@ solar_scenarios:
     max_daily_cycles: null
     sizing_step_kwh: 1.0
     sizing_max_kwh: 30.0
+    # Linear capex, EUR per kWh of storage. Drives payback_years /
+    # yearly_return_pct in solar-scenarios.json (null = ROI skipped).
+    price_eur_per_kwh: 250.0
   marginal_saving_threshold_eur_per_kwh: 0.30
   marginal_reference_contract: best
   # Night grid charging variant (`solar_scenarios[i].night_charge_batteries`):
